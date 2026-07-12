@@ -4,6 +4,7 @@ members = [
     "crates/raven-cli",
     "crates/raven-core",
     "crates/raven-plugin-sdk",
+    "crates/raven-runtime",
     "crates/raven-source-alloy",
 ]
 

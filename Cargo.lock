@@ -331,6 +331,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "raven-runtime"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "raven-core",
+ "raven-plugin-sdk",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "raven-source-alloy"
 version = "0.1.0"
 dependencies = [

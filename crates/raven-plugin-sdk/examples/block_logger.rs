@@ -14,6 +14,7 @@ use eyre::Result;
 use raven_core::{BlockEvent, ChainEvent, ChainId};
 use raven_plugin_sdk::{Plugin, PluginContext, PluginMetadata, PluginResult};
 
+#[derive(Debug)]
 pub struct BlockLoggerPlugin;
 
 #[tokio::main]
