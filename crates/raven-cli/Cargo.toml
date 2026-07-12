@@ -1,0 +1,22 @@
+[package]
+name = "raven"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "raven"
+path = "src/main.rs"
+
+[dependencies]
+eyre.workspace = true
+clap.workspace = true
+colored.workspace = true
+raven-core = { path = "../raven-core" }
+raven-plugin-sdk = { path = "../raven-plugin-sdk" }
+raven-source-alloy = { path = "../raven-source-alloy" }
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

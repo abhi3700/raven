@@ -1,0 +1,5 @@
+/target
+.env
+.raven/
+*.log
+.DS_Store
