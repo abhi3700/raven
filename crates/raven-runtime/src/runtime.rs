@@ -142,7 +142,6 @@ mod tests {
 		atomic::{AtomicUsize, Ordering},
 	};
 
-	#[derive(Debug)]
 	struct LifecyclePlugin {
 		starts: Arc<AtomicUsize>,
 		events: Arc<AtomicUsize>,

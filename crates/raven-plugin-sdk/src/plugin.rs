@@ -4,7 +4,7 @@ use raven_core::ChainEvent;
 
 /// A reusable Raven blockchain event processor.
 #[async_trait]
-pub trait Plugin: std::fmt::Debug + Send + Sync {
+pub trait Plugin: Send + Sync {
 	/// Returns static information about the plugin.
 	fn metadata(&self) -> PluginMetadata;
 
@@ -29,7 +29,6 @@ mod tests {
 
 	use super::*;
 
-	#[derive(Debug)]
 	struct TestPlugin {
 		handled_events: usize,
 		started: bool,

@@ -2,9 +2,19 @@ use crate::{RuntimeError, RuntimeResult};
 use raven_plugin_sdk::Plugin;
 
 /// Stores plugins registered with a Raven runtime.
-#[derive(Default, Debug)]
+#[derive(Default)]
 pub(crate) struct PluginRegistry {
 	plugins: Vec<Box<dyn Plugin>>,
+}
+
+use std::fmt;
+
+impl fmt::Debug for PluginRegistry {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_struct("PluginRegistry")
+			.field("plugin_count", &self.plugins.len())
+			.finish()
+	}
 }
 
 impl PluginRegistry {
@@ -55,7 +65,6 @@ mod tests {
 
 	use super::*;
 
-	#[derive(Debug)]
 	struct TestPlugin {
 		name: &'static str,
 	}

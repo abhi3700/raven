@@ -97,7 +97,6 @@ mod tests {
 
 	use super::*;
 
-	#[derive(Debug)]
 	struct CountingPlugin {
 		event_count: Arc<AtomicUsize>,
 	}
