@@ -324,7 +324,10 @@ name = "raven-plugin-sdk"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "eyre",
  "raven-core",
+ "thiserror",
+ "tokio",
 ]
 
 [[package]]
