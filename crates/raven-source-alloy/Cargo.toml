@@ -7,8 +7,17 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-eyre.workspace = true
+alloy.workspace = true
 futures-util.workspace = true
 raven-core = { path = "../raven-core" }
+raven-plugin-sdk = { path = "../raven-plugin-sdk" }
+thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
+eyre.workspace = true
+async-trait.workspace = true
+raven-plugin-sdk = { path = "../raven-plugin-sdk" }
+raven-runtime = { path = "../raven-runtime" }
+tracing-subscriber.workspace = true
