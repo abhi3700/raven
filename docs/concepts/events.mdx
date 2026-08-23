@@ -1,0 +1,81 @@
+---
+title: "Events and validation"
+description: "Raven's normalized chain event model and the invariants enforced at its boundaries."
+---
+
+## Chain ID
+
+`ChainId` wraps an EIP-155 numeric chain ID. Zero is rejected.
+
+```rust
+use raven_core::ChainId;
+
+let ethereum = ChainId::new(1)?;
+assert_eq!(ethereum, ChainId::ETHEREUM);
+```
+
+## Block event
+
+`BlockEvent` stores source-independent block metadata:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `chain_id` | `ChainId` | EIP-155 chain ID |
+| `block_number` | `u64` | Block height |
+| `block_hash` | `String` | 32-byte, `0x`-prefixed hexadecimal hash |
+| `parent_hash` | `String` | Parent hash in the same format |
+| `timestamp` | `u64` | Unix timestamp in seconds |
+| `transaction_count` | `usize` | Transactions in the block |
+
+`BlockEvent::new` validates both hashes. For a non-genesis block, the block and
+parent hashes must differ.
+
+## Chain event
+
+The current event enum has two variants:
+
+```rust
+pub enum ChainEvent {
+    BlockApplied(BlockEvent),
+    BlockReverted(BlockEvent),
+}
+```
+
+`BlockApplied` means a block joined the canonical chain. `BlockReverted` means a
+previously applied block left the canonical chain.
+
+Convenience methods expose common metadata without matching the enum:
+
+```rust
+let block = event.block();
+let chain_id = event.chain_id();
+let number = event.block_number();
+
+if event.is_applied() {
+    // Process a canonical block.
+}
+```
+
+<Note>
+The model supports reverted blocks, but the Alloy source currently emits only
+`BlockApplied`. Reorg detection is on the roadmap.
+</Note>
+
+## Serialization
+
+Core event types derive Serde serialization. `ChainEvent` uses an internally
+tagged shape with snake-case variant names:
+
+```json
+{
+  "type": "block_applied",
+  "data": {
+    "chain_id": 1,
+    "block_number": 21000000,
+    "block_hash": "0x1111111111111111111111111111111111111111111111111111111111111111",
+    "parent_hash": "0x2222222222222222222222222222222222222222222222222222222222222222",
+    "timestamp": 1720000000,
+    "transaction_count": 150
+  }
+}
+```

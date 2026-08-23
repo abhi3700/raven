@@ -1,0 +1,59 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Raven",
+  "description": "A programmable event engine for EVM chains.",
+  "colors": {
+    "primary": "#168BFF",
+    "light": "#42A5FF",
+    "dark": "#0874D1"
+  },
+  "logo": "/res/logo.png",
+  "favicon": "/res/logo.png",
+  "appearance": {
+    "default": "dark"
+  },
+  "icons": {
+    "library": "lucide"
+  },
+  "navigation": {
+    "groups": [
+      {
+        "group": "Overview",
+        "pages": [
+          "docs/index"
+        ]
+      },
+      {
+        "group": "Get started",
+        "pages": [
+          "docs/getting-started/installation",
+          "docs/getting-started/quickstart"
+        ]
+      },
+      {
+        "group": "Core concepts",
+        "pages": [
+          "docs/concepts/architecture",
+          "docs/concepts/events",
+          "docs/concepts/plugin-lifecycle"
+        ]
+      },
+      {
+        "group": "Guides",
+        "pages": [
+          "docs/guides/create-a-plugin",
+          "docs/guides/alloy-source"
+        ]
+      },
+      {
+        "group": "Reference",
+        "pages": [
+          "docs/reference/cli",
+          "docs/reference/crates",
+          "docs/reference/roadmap"
+        ]
+      }
+    ]
+  }
+}

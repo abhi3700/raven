@@ -1,0 +1,18 @@
+# Rust sources and generated build artifacts are not documentation pages
+
+/crates/
+/target/
+
+# Repository metadata and development configuration
+
+/.git/
+/.github/
+/.agents/
+/.codex/
+/Cargo.lock
+/Cargo.toml
+/rust-toolchain.toml
+/rustfmt.toml
+/doc.sh
+/LICENSE
+/README.md

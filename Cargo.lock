@@ -3194,11 +3194,13 @@ dependencies = [
 name = "raven"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "clap",
  "colored",
  "eyre",
  "raven-core",
  "raven-plugin-sdk",
+ "raven-runtime",
  "raven-source-alloy",
  "tokio",
  "tracing",
