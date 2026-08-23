@@ -1,10 +1,10 @@
 ---
 title: "Create a plugin"
-description: "Implement and test a reusable Raven event processor."
+description: "description: "Implement and test a Raven plugin that processes chain events."
 ---
 
-A Raven plugin implements one required method, `handle_event`. Startup and
-shutdown hooks are optional.
+A Raven plugin implements one required method, `handle_event`. Startup (i.e. `start`) and
+`shutdown` hooks are optional.
 
 ## Implement the trait
 
@@ -98,6 +98,6 @@ cargo run -p raven-plugin-sdk --example block_logger
 - Unit-test the lifecycle with constructed `ChainEvent` values.
 
 <Note>
-Dynamic installation and discovery are planned. Today plugins are Rust types
-registered directly with a `Runtime`.
+    Dynamic installation and discovery are planned. Today plugins are Rust types
+    registered directly with a `Runtime`.
 </Note>
