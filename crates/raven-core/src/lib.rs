@@ -1,15 +1,9 @@
-use serde::{Deserialize, Serialize};
+mod block;
+mod chain;
+mod error;
+mod event;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ChainEvent {
-	BlockApplied(BlockEvent),
-	BlockReverted(BlockEvent),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BlockEvent {
-	pub chain_id: u64,
-	pub block_number: u64,
-	pub block_hash: String,
-	pub parent_hash: String,
-}
+pub use block::BlockEvent;
+pub use chain::ChainId;
+pub use error::CoreError;
+pub use event::ChainEvent;

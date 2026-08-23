@@ -1,7 +1,7 @@
 # Raven
 
 <p align="center">
-  <img src="./res/logo.png" width="180" alt="Raven Logo">
+  <img src="./res/logo.png" width="180" alt="Raven logo" />
 </p>
 
 <p align="center">
@@ -9,335 +9,192 @@
 </p>
 
 <p align="center">
-  Build event-driven blockchain applications using modular plugins, powered by Alloy today and Reth ExEx tomorrow.
+  Build event-driven blockchain applications with normalized chain events,
+  a source-independent runtime, and reusable Rust plugins.
 </p>
-
----
 
 ## Why Raven?
 
-Today, most blockchain applications continuously poll RPC endpoints to detect new blocks, transactions, and logs.
+Blockchain applications often rebuild the same RPC polling, block
+normalization, and event dispatch pipeline. Raven separates that infrastructure
+from application behavior:
 
-```
-  RPC
+```text
+EVM chain
    │
    ▼
-Your Backend
+Event source (Alloy today, Reth ExEx planned)
    │
-Polling
+   ▼
+Normalized ChainEvent
    │
-Database
-```
-
-This approach works, but every application ends up rebuilding the same ingestion pipeline.
-
-Raven takes a different approach.
-
-```
-Blockchain
-      │
-      ▼
-Event Source
-(Alloy / Reth)
-      │
-      ▼
+   ▼
 Raven Runtime
-      │
-      ▼
+   │
+   ▼
 Plugins
-      │
-      ├── Portfolio
-      ├── Swap Analytics
-      ├── Whale Alerts
-      ├── Telegram
-      ├── Database
-      └── ...
 ```
 
-Instead of building another indexer, Raven provides a runtime for composing reusable blockchain event processors.
+The Alloy source owns JSON-RPC access, `raven-core` owns validated event types,
+the runtime owns lifecycle and dispatch, and plugins own application logic.
 
----
+## Current features
 
-## Features
+- Event-driven, async Rust architecture
+- Validated, serializable core event model
+- Unique-name plugin registration and lifecycle hooks
+- Runtime state and chain-ID validation
+- Ordered block polling through Alloy
+- Working CLI orchestration with graceful Ctrl+C shutdown
+- Source abstraction designed for future Reth ExEx support
 
-- ⚡ Event-driven architecture
-- 🔌 Modular plugin system
-- 🦀 Written in Rust
-- 🌐 Multi-chain EVM support
-- 🔄 Source abstraction (Alloy today, Reth ExEx later)
-- 📦 CLI-first experience
-- 🚀 Async runtime powered by Tokio
+> **Important:** Raven is early-stage. Reorg detection, dynamic plugin
+> installation, persistent configuration, and Reth ExEx integration are planned
+> but not yet implemented.
 
----
-
-## Architecture
-
-```
-                 Raven CLI
-                      │
-                      ▼
-               Raven Runtime
-                      │
-          ┌───────────┴────────────┐
-          │                        │
-     Alloy Source             Reth Source
-      (RPC/WebSocket)          (ExEx)
-          │                        │
-          └───────────┬────────────┘
-                      ▼
-              Chain Event Stream
-                      │
-              Event Dispatcher
-                      │
-      ┌───────────────┼────────────────┐
-      ▼               ▼                ▼
-  Swap Plugin   Portfolio Plugin   Whale Plugin
-                      │
-                      ▼
-                 Output Sinks
-```
-
----
-
-## Project Structure
-
-```
-raven/
-├── crates/
-│   ├── raven-cli/
-│   ├── raven-core/
-│   ├── raven-plugin-sdk/
-│   └── raven-source-alloy/
-│
-├── plugins/
-│
-├── examples/
-│
-└── README.md
-```
-
----
-
-## Getting Started
-
-<!-- TODO: -->
+## Getting started
 
 ### Prerequisites
 
-Before running Raven, ensure you have:
-
-- Rust (stable)
+- Rust 1.91 or newer
 - Cargo
-- An Ethereum RPC endpoint (e.g. local node, LlamaRPC, Alchemy, QuickNode)
+- An Ethereum-compatible HTTP JSON-RPC endpoint
 
-Verify your Rust installation:
-
-```sh
-rustc --version
-cargo --version
-```
-
-### Clone the repository
-
-```sh
-git clone https://github.com/abhi3700/raven.git
-cd raven
-```
-
-### Build Raven
-
-```sh
-cargo build
-```
-
-For a release build:
-
-```sh
-cargo build --release
-```
-
-### Run Raven
-
-Follow the [usage](#usage).
-
-## Usage
-
-> [!NOTE]
-> If using cargo to run the `raven`, then use `cargo r -p raven -- COMMAND ...`. If `raven` installed using `cargo install ..`, then use like `raven COMMAND ...`.
-
-### Start Raven with Alloy
+### Build and test
 
 ```bash
-cargo r -p raven -- run \
+git clone https://github.com/abhi3700/raven.git
+cd raven
+
+cargo build --workspace
+cargo test --workspace --all-targets
+```
+
+### Run with Alloy
+
+Pass an endpoint directly:
+
+```bash
+cargo run -p raven -- run \
   --source alloy \
   --rpc-url https://ethereum-rpc.publicnode.com
 ```
 
-Raven connects to the configured RPC endpoint, listens for new blocks, converts them into `ChainEvent`s, and dispatches them to all enabled plugins.
-
----
-
-### List installed plugins
+Or configure it through the environment:
 
 ```bash
-raven plugins list
+export RAVEN_RPC_URL="http://localhost:8545"
+cargo run -p raven -- run
 ```
 
-Example output:
+Raven discovers the endpoint's chain ID, polls for blocks, sends normalized
+events through the runtime, and logs each block with the built-in
+`block-logger` plugin. Press Ctrl+C to shut down cleanly.
 
-```text
-✔ transfer
-✔ swap
-✔ portfolio
-```
-
----
-
-### Install a plugin *(planned)*
+Tune the polling interval when needed:
 
 ```bash
-raven plugins install whale
+cargo run -p raven -- run \
+  --rpc-url http://localhost:8545 \
+  --poll-interval-ms 1000
 ```
 
----
+Use `cargo run -p raven -- --help` for the full CLI help.
 
-### Run with Reth *(planned)*
-
-```bash
-raven run \
-  --source reth
-```
-
-When using Reth, Raven consumes execution events directly from a local Reth node via ExEx instead of an RPC endpoint.
-
----
-
-### Show configuration
-
-```bash
-raven config
-```
-
----
-
-### Verify your installation
-
-```bash
-raven doctor
-```
-
-## Philosophy
-
-Raven is built around one idea:
-
-> **Everything is an event.**
-
-A new block.
-
-A transfer.
-
-A swap.
-
-A liquidation.
-
-A contract deployment.
-
-Every event flows through the runtime, where plugins decide how to react.
-
----
-
-## Example
+## Write a plugin
 
 ```rust
+use async_trait::async_trait;
+use raven_core::ChainEvent;
+use raven_plugin_sdk::{
+    Plugin, PluginContext, PluginMetadata, PluginResult,
+};
+
+struct BlockLogger;
+
 #[async_trait]
-impl Plugin for SwapPlugin {
-    async fn on_event(
+impl Plugin for BlockLogger {
+    fn metadata(&self) -> PluginMetadata {
+        PluginMetadata::new(
+            "block-logger",
+            env!("CARGO_PKG_VERSION"),
+            "Logs newly applied blocks",
+        )
+    }
+
+    async fn handle_event(
         &mut self,
         event: &ChainEvent,
-        ctx: &Context,
-    ) -> Result<()> {
-        // Decode swaps
-        // Update metrics
-        // Store data
+        _context: &PluginContext,
+    ) -> PluginResult {
+        println!("block #{}", event.block_number());
         Ok(())
     }
 }
 ```
 
----
-
-## Planned Plugins
-
-- ERC20 Transfers
-- ERC721 Events
-- DEX Swap Decoder
-- Portfolio Tracker
-- Whale Tracker
-- Telegram Alerts
-- PostgreSQL Sink
-- SQLite Sink
-- Redis Sink
-- Kafka Sink
-- Webhook Sink
-
----
-
-## Event Sources
-
-### Alloy (Phase 1)
+Run the self-contained SDK example:
 
 ```bash
-raven run \
-  --source alloy \
-  --rpc-url https://...
+cargo run -p raven-plugin-sdk --example block_logger
 ```
 
-Ideal for development and existing RPC providers.
+## Workspace structure
 
----
+```text
+raven/
+├── crates/
+│   ├── raven-cli/           # CLI and source/runtime orchestration
+│   ├── raven-core/          # Validated normalized chain events
+│   ├── raven-plugin-sdk/    # Plugin contract and context
+│   ├── raven-runtime/       # Registry, lifecycle, and dispatcher
+│   └── raven-source-alloy/  # Alloy HTTP JSON-RPC source
+├── docs/                    # Mintlify MDX pages
+├── docs.json                # Mintlify site configuration
+├── res/                     # Brand assets
+└── README.md
+```
 
-### Reth ExEx (Phase 2)
+## Documentation
+
+The complete Mintlify documentation starts at
+[docs/index.mdx](./docs/index.mdx). Its navigation and theme are configured in
+[docs.json](./docs.json).
+
+Preview the site locally with Node.js 20.17 or newer:
 
 ```bash
-raven run \
-  --source reth
+npm install -g mint
+./doc.sh
 ```
 
-Runs directly on top of a local Reth node for low-latency, execution-aware event processing.
+The preview uses port `3777` by default. Override it or pass additional
+Mintlify flags when needed:
 
----
+```bash
+MINTLIFY_PORT=4000 ./doc.sh --no-open
+```
+
+Before publishing documentation changes:
+
+```bash
+mint broken-links
+mint validate
+```
 
 ## Roadmap
 
-### Phase 1
+Near-term work includes:
 
-- [ ] CLI
-- [ ] Alloy event source
-- [ ] Event dispatcher
-- [ ] Plugin SDK
-- [ ] Transfer plugin
+- Reorg-aware applied and reverted block events
+- Retry and backoff for transient RPC failures
+- Historical starting-block configuration
+- ERC-20 transfer and DEX swap plugins
+- Plugin discovery and installation
+- Reth ExEx integration
 
-### Phase 2
-
-- [ ] Swap decoder
-- [ ] Portfolio plugin
-- [ ] SQLite sink
-- [ ] PostgreSQL sink
-
-### Phase 3
-
-- [ ] Plugin installation
-- [ ] Plugin registry
-- [ ] Dynamic loading
-- [ ] Webhook support
-
-### Phase 4
-
-- [ ] Reth ExEx integration
-- [ ] Reorg-aware processing
-- [ ] Distributed runtime
-
----
+See the [full roadmap](./docs/reference/roadmap.mdx) for implemented and planned
+capabilities.
 
 ## License
 

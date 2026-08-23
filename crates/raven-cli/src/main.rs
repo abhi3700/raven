@@ -1,88 +1,42 @@
-use clap::{Parser, Subcommand};
+mod cli;
+mod runner;
+
+use clap::Parser;
+use cli::{Cli, Command, PluginCommand};
 use colored::Colorize;
-use eyre::Result;
-
-#[derive(Debug, Parser)]
-#[command(name = "raven", version, about = "A programmable event engine for EVM chains")]
-struct Cli {
-	#[command(subcommand)]
-	command: Option<Command>,
-}
-
-#[derive(Debug, Subcommand)]
-enum Command {
-	/// Start processing chain events.
-	Run,
-
-	/// Manage Raven plugins.
-	Plugins {
-		#[command(subcommand)]
-		command: PluginCommand,
-	},
-
-	/// Inspect the Raven installation and configuration.
-	Doctor,
-
-	/// Print Raven configuration.
-	Config,
-}
-
-#[derive(Debug, Subcommand)]
-enum PluginCommand {
-	/// List installed plugins.
-	List,
-
-	/// Install a plugin.
-	Install {
-		/// Plugin name, for example `erc20-transfer`.
-		name: String,
-	},
-
-	/// Remove an installed plugin.
-	Remove {
-		/// Plugin name.
-		name: String,
-	},
-}
+use eyre::{Result, bail};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-	tracing_subscriber::fmt()
-		.with_env_filter(
-			tracing_subscriber::EnvFilter::try_from_default_env()
-				.unwrap_or_else(|_| "raven=info".into()),
-		)
-		.init();
+	init_tracing();
 
 	let cli = Cli::parse();
 
 	print_banner();
 
 	match cli.command {
-		Some(Command::Run) => {
-			println!("{}", "Starting Raven...".bright_green().bold());
-		},
+		Some(Command::Run(args)) => runner::run(args).await?,
 
 		Some(Command::Plugins { command }) => match command {
 			PluginCommand::List => {
-				println!("{}", "No plugins installed.".yellow());
+				println!("{}", "No external plugins installed.".yellow());
 			},
 
 			PluginCommand::Install { name } => {
-				println!("{} {}", "Installing plugin".bright_blue(), name.bold());
+				bail!("plugin installation is planned but not implemented (requested '{name}')");
 			},
 
 			PluginCommand::Remove { name } => {
-				println!("{} {}", "Removing plugin".bright_red(), name.bold());
+				bail!("plugin removal is planned but not implemented (requested '{name}')");
 			},
 		},
 
 		Some(Command::Doctor) => {
-			println!("{}", "Raven installation looks healthy.".green());
+			println!("{} Raven CLI {}", "✔".green(), env!("CARGO_PKG_VERSION"));
 		},
 
 		Some(Command::Config) => {
-			println!("{}", "No configuration file found.".yellow());
+			print_configuration();
 		},
 
 		None => {
@@ -91,6 +45,22 @@ async fn main() -> Result<()> {
 	}
 
 	Ok(())
+}
+
+fn init_tracing() {
+	tracing_subscriber::fmt()
+		.with_env_filter(
+			tracing_subscriber::EnvFilter::try_from_default_env()
+				.unwrap_or_else(|_| "raven=info,raven_source_alloy=info".into()),
+		)
+		.init();
+}
+
+fn print_configuration() {
+	match std::env::var("RAVEN_RPC_URL") {
+		Ok(rpc_url) => println!("RAVEN_RPC_URL={rpc_url}"),
+		Err(_) => println!("{}", "RAVEN_RPC_URL is not set.".yellow()),
+	}
 }
 
 fn print_banner() {

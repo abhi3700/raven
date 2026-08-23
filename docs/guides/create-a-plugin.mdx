@@ -1,0 +1,103 @@
+---
+title: "Create a plugin"
+description: "Implement and test a reusable Raven event processor."
+---
+
+A Raven plugin implements one required method, `handle_event`. Startup and
+shutdown hooks are optional.
+
+## Implement the trait
+
+```rust
+use async_trait::async_trait;
+use raven_core::ChainEvent;
+use raven_plugin_sdk::{
+    Plugin, PluginContext, PluginMetadata, PluginResult,
+};
+
+struct BlockLogger;
+
+#[async_trait]
+impl Plugin for BlockLogger {
+    fn metadata(&self) -> PluginMetadata {
+        PluginMetadata::new(
+            "block-logger",
+            env!("CARGO_PKG_VERSION"),
+            "Logs newly applied blocks",
+        )
+    }
+
+    async fn start(
+        &mut self,
+        context: &PluginContext,
+    ) -> PluginResult {
+        println!("starting on chain {}", context.chain_id().get());
+        Ok(())
+    }
+
+    async fn handle_event(
+        &mut self,
+        event: &ChainEvent,
+        _context: &PluginContext,
+    ) -> PluginResult {
+        if event.is_applied() {
+            println!("block #{}", event.block_number());
+        }
+
+        Ok(())
+    }
+
+    async fn shutdown(
+        &mut self,
+        _context: &PluginContext,
+    ) -> PluginResult {
+        println!("stopped");
+        Ok(())
+    }
+}
+```
+
+## Register the plugin
+
+```rust
+use raven_core::ChainId;
+use raven_runtime::Runtime;
+
+let mut runtime = Runtime::new(ChainId::ETHEREUM);
+runtime.register_plugin(BlockLogger)?;
+runtime.start().await?;
+```
+
+## Return useful errors
+
+Use the closest `PluginError` category so callers can diagnose failures:
+
+```rust
+use raven_plugin_sdk::PluginError;
+
+return Err(PluginError::EventProcessing(
+    "expected a Transfer topic".to_owned(),
+));
+```
+
+## Run the included example
+
+The SDK includes a self-contained block logger that does not need an RPC node:
+
+```bash
+cargo run -p raven-plugin-sdk --example block_logger
+```
+
+## Plugin design guidance
+
+- Keep metadata names stable and unique.
+- Match only the event variants the plugin understands.
+- Keep `handle_event` bounded; plugins are called sequentially.
+- Return errors instead of panicking on chain data.
+- Allocate external clients in `start` and release resources in `shutdown`.
+- Unit-test the lifecycle with constructed `ChainEvent` values.
+
+<Note>
+Dynamic installation and discovery are planned. Today plugins are Rust types
+registered directly with a `Runtime`.
+</Note>

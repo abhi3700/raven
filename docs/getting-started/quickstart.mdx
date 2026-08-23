@@ -1,0 +1,70 @@
+---
+title: "Quickstart"
+description: "Connect Raven to an EVM JSON-RPC endpoint and process live block events."
+---
+
+## 1. Choose an RPC endpoint
+
+Raven currently supports Ethereum-compatible HTTP JSON-RPC endpoints through
+Alloy. You may use a local node or a hosted provider.
+
+Set the endpoint once for the current shell:
+
+```bash
+export RAVEN_RPC_URL="http://localhost:8545"
+```
+
+## 2. Start Raven
+
+From the workspace root:
+
+```bash
+cargo run -p raven -- run --source alloy
+```
+
+You can pass the endpoint directly instead:
+
+```bash
+cargo run -p raven -- run \
+  --source alloy \
+  --rpc-url https://ethereum-rpc.publicnode.com
+```
+
+Raven discovers the remote chain ID, polls the current block number, fetches
+full blocks, and passes normalized events through the runtime. The CLI's built-in
+`block-logger` plugin logs each processed block.
+
+## 3. Stop cleanly
+
+Press Ctrl+C. Raven stops the source task and calls `shutdown()` on each started
+plugin before exiting.
+
+## Tune polling
+
+The default polling interval is 4,000 milliseconds:
+
+```bash
+cargo run -p raven -- run \
+  --rpc-url http://localhost:8545 \
+  --poll-interval-ms 1000
+```
+
+The interval must be at least one millisecond. A shorter interval detects new
+blocks sooner but makes more `eth_blockNumber` requests.
+
+<Warning>
+The Alloy source currently starts from the latest block observed at startup and
+does not backfill older history. It also emits applied blocks only; reorg
+detection is planned.
+</Warning>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Create a plugin" icon="plug" href="/docs/guides/create-a-plugin">
+    Add application-specific event handling.
+  </Card>
+  <Card title="Alloy source behavior" icon="radio" href="/docs/guides/alloy-source">
+    Learn the polling and delivery guarantees.
+  </Card>
+</CardGroup>

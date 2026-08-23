@@ -1,0 +1,85 @@
+---
+title: "CLI reference"
+description: "Commands, flags, and environment variables supported by the Raven binary."
+---
+
+During development, prefix commands with:
+
+```bash
+cargo run -p raven --
+```
+
+After `cargo install --path crates/raven-cli`, invoke `raven` directly.
+
+## `raven run`
+
+Start the event-processing loop.
+
+```bash
+raven run --rpc-url <URL> [OPTIONS]
+```
+
+| Option | Environment | Default | Description |
+| --- | --- | --- | --- |
+| `--rpc-url <URL>` | `RAVEN_RPC_URL` | Required | Ethereum-compatible HTTP JSON-RPC endpoint |
+| `--source <SOURCE>` | — | `alloy` | Event source; currently only `alloy` |
+| `--poll-interval-ms <MS>` | — | `4000` | Block-number polling interval; must be greater than zero |
+
+Example:
+
+```bash
+raven run \
+  --source alloy \
+  --rpc-url http://localhost:8545 \
+  --poll-interval-ms 1000
+```
+
+## `raven plugins list`
+
+Report external plugins known to the CLI:
+
+```bash
+raven plugins list
+```
+
+The current CLI does not have persistent plugin discovery, so this reports that
+no external plugins are installed. The built-in `block-logger` used by
+`raven run` is not an external plugin.
+
+## Planned plugin commands
+
+`raven plugins install <NAME>` and `raven plugins remove <NAME>` are present to
+reserve the command interface. They currently exit with an explicit
+“not implemented” error and do not modify the system.
+
+## `raven doctor`
+
+Print the Raven CLI version and confirm that the executable starts:
+
+```bash
+raven doctor
+```
+
+This is a lightweight binary check. It does not currently test RPC
+connectivity, storage, or plugin loading.
+
+## `raven config`
+
+Print the effective `RAVEN_RPC_URL` environment value:
+
+```bash
+raven config
+```
+
+Persistent configuration files are not implemented yet.
+
+## Logging
+
+Raven uses `tracing` and reads `RUST_LOG`:
+
+```bash
+RUST_LOG=raven=debug,raven_source_alloy=debug \
+  raven run --rpc-url http://localhost:8545
+```
+
+The default filter enables info logs for the CLI and Alloy source.

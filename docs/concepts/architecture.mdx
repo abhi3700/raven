@@ -1,0 +1,82 @@
+---
+title: "Architecture"
+description: "How Raven separates event ingestion, normalization, orchestration, and application logic."
+---
+
+Raven is a Cargo workspace whose crates follow one dependency direction:
+
+```text
+                         raven CLI
+                       /     |      \
+                      v      v       v
+             Alloy source  Runtime  Plugin SDK
+                    |       /   \       |
+                    └─────> Core <──────┘
+```
+
+## Event flow
+
+```text
+Ethereum JSON-RPC
+        │
+        ▼
+    AlloySource
+        │  normalizes native blocks
+        ▼
+ mpsc::channel<ChainEvent>
+        │
+        ▼
+      Runtime
+        │  checks state and chain ID
+        ▼
+    Dispatcher
+        │
+        ├──► Plugin A
+        ├──► Plugin B
+        └──► Plugin C
+```
+
+### 1. Source
+
+An event source communicates with a chain and converts source-native types into
+Raven core types. `raven-source-alloy` polls JSON-RPC today. A future Reth source
+can convert ExEx notifications into the same event model.
+
+### 2. Core
+
+`raven-core` contains source-independent values such as `ChainId`, `BlockEvent`,
+and `ChainEvent`. Constructors validate invariants at this boundary so the rest
+of the system can rely on normalized input.
+
+### 3. Runtime
+
+`raven-runtime` owns plugin registration, lifecycle state, chain validation, and
+dispatch. A runtime handles one chain ID. It rejects events from any other
+chain.
+
+### 4. Plugin SDK
+
+`raven-plugin-sdk` defines the plugin contract, execution context, metadata, and
+plugin error types. Plugins depend on normalized events, not Alloy or Reth.
+
+### 5. CLI
+
+The `raven` binary composes the source and runtime. It starts the Alloy source in
+a Tokio task, creates a runtime after discovering the first event's chain ID,
+and performs graceful shutdown on Ctrl+C.
+
+## Dispatch semantics
+
+Plugins are called sequentially in registration order. The dispatcher is
+fail-fast: if a plugin returns an error, the current runtime operation returns a
+`RuntimeError::PluginOperation` and later plugins do not receive that call.
+
+This behavior is deterministic and simple, but a slow plugin also delays every
+plugin registered after it. Parallel dispatch and per-plugin isolation are
+possible future policies; they are not current behavior.
+
+## Stability boundaries
+
+The normalized core model is the primary boundary between adapters and
+applications. A new source should convert into `ChainEvent`. A new plugin should
+implement `Plugin`. Neither extension should require the other to change.

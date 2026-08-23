@@ -1,0 +1,66 @@
+---
+title: "Installation"
+description: "Install Raven's prerequisites, clone the repository, and build the workspace."
+---
+
+## Prerequisites
+
+You need:
+
+- Git
+- Rust 1.91 or newer
+- Cargo
+- An Ethereum-compatible HTTP JSON-RPC endpoint
+
+The repository pins its Rust toolchain in `rust-toolchain.toml`. Rustup selects
+that toolchain automatically when you enter the project directory.
+
+Verify your local tools:
+
+```bash
+rustc --version
+cargo --version
+git --version
+```
+
+## Clone Raven
+
+```bash
+git clone https://github.com/abhi3700/raven.git
+cd raven
+```
+
+## Build
+
+Build the full workspace:
+
+```bash
+cargo build --workspace
+```
+
+For an optimized CLI binary:
+
+```bash
+cargo build --release -p raven
+```
+
+The release binary is written to `target/release/raven`.
+
+## Install the CLI locally
+
+Install the current checkout into Cargo's binary directory:
+
+```bash
+cargo install --path crates/raven-cli
+```
+
+Then verify it:
+
+```bash
+raven doctor
+```
+
+<Tip>
+During development, every installed command can also be run without installing:
+`cargo run -p raven -- <command>`.
+</Tip>

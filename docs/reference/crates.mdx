@@ -1,0 +1,74 @@
+---
+title: "Workspace crates"
+description: "Responsibilities and public interfaces for every crate in the Raven workspace."
+---
+
+Raven is organized as a Cargo workspace with five crates.
+
+| Crate | Kind | Responsibility |
+| --- | --- | --- |
+| `raven-core` | Library | Validated, source-independent chain types |
+| `raven-plugin-sdk` | Library | Plugin trait, context, metadata, and errors |
+| `raven-runtime` | Library | Plugin registration, lifecycle, validation, and dispatch |
+| `raven-source-alloy` | Library | HTTP JSON-RPC polling and Alloy-to-Raven conversion |
+| `raven` | Binary | CLI parsing and source/runtime orchestration |
+
+## `raven-core`
+
+Public exports:
+
+- `ChainId`
+- `BlockEvent`
+- `ChainEvent`
+- `CoreError`
+
+Use this crate in source adapters, plugins, serialization boundaries, and tests
+that construct normalized events.
+
+## `raven-plugin-sdk`
+
+Public exports:
+
+- `Plugin`
+- `PluginContext`
+- `PluginMetadata`
+- `PluginError`
+- `PluginResult`
+
+Use this crate when implementing an event processor.
+
+## `raven-runtime`
+
+Public exports:
+
+- `Runtime`
+- `RuntimeError`
+- `RuntimeResult`
+
+`Dispatcher` and `PluginRegistry` are internal implementation details. Use
+`Runtime::register_plugin` and lifecycle methods instead of depending on them.
+
+## `raven-source-alloy`
+
+Public exports:
+
+- `AlloySource`
+- `AlloySourceError`
+- `AlloySourceResult`
+
+Alloy block conversion remains private so source-native types do not leak into
+the rest of the workspace.
+
+## `raven`
+
+The binary crate owns:
+
+- Command-line parsing.
+- Tracing initialization.
+- Source task creation.
+- Runtime initialization from the first discovered event.
+- Ctrl+C handling and graceful shutdown.
+- The built-in block logger used by `raven run`.
+
+The CLI is an integration layer. Domain types belong in `raven-core` and runtime
+policy belongs in `raven-runtime`.

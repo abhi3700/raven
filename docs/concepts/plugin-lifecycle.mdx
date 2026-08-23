@@ -1,0 +1,64 @@
+---
+title: "Plugin lifecycle"
+description: "Registration, startup, event handling, errors, and shutdown in the Raven runtime."
+---
+
+Every plugin follows three lifecycle phases:
+
+```text
+register
+   │
+   ▼
+start(context)          once
+   │
+   ▼
+handle_event(...)       zero or more times
+   │
+   ▼
+shutdown(context)       once on clean runtime shutdown
+```
+
+## Registration
+
+Register plugins before calling `Runtime::start`:
+
+```rust
+let mut runtime = Runtime::new(ChainId::ETHEREUM);
+runtime.register_plugin(MyPlugin)?;
+runtime.start().await?;
+```
+
+Plugin names come from `Plugin::metadata` and must be unique inside one runtime.
+Registration after startup returns `RuntimeError::RegistrationAfterStart`.
+
+## Startup
+
+The runtime calls `start` for every plugin in registration order. The default
+implementation succeeds without doing anything, so plugins only override it
+when they need initialization.
+
+## Event handling
+
+`Runtime::process` requires a started runtime. Before dispatch, the runtime
+checks that the event chain ID matches its configured chain ID. It then calls
+`handle_event` on each plugin sequentially.
+
+## Errors
+
+A plugin returns `PluginResult`. The SDK provides categorized errors for
+configuration, event processing, storage, and uncategorized failures.
+
+The runtime wraps a plugin error with:
+
+- The plugin name.
+- The lifecycle operation that failed.
+- The original `PluginError` as its source.
+
+Dispatch is fail-fast. A plugin error prevents later plugins from receiving the
+same lifecycle call or event.
+
+## Shutdown
+
+`Runtime::shutdown` calls each plugin's `shutdown` hook in registration order.
+The CLI invokes it after Ctrl+C or after the Alloy source stops, as long as the
+runtime reached the started state.

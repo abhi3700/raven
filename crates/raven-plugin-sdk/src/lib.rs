@@ -1,13 +1,9 @@
-use async_trait::async_trait;
-use raven_core::ChainEvent;
+mod context;
+mod error;
+mod metadata;
+mod plugin;
 
-pub type PluginResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
-
-#[async_trait]
-pub trait Plugin: Send + Sync {
-	fn name(&self) -> &'static str;
-
-	fn version(&self) -> &'static str;
-
-	async fn handle_event(&mut self, event: &ChainEvent) -> PluginResult;
-}
+pub use context::PluginContext;
+pub use error::{PluginError, PluginResult};
+pub use metadata::PluginMetadata;
+pub use plugin::Plugin;

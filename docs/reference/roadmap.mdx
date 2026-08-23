@@ -1,0 +1,59 @@
+---
+title: "Roadmap"
+description: "Implemented capabilities, near-term work, and longer-term direction for Raven."
+---
+
+Raven is under active development. This page separates working behavior from
+planned interfaces.
+
+## Available now
+
+- [x] Validated chain IDs and normalized block events
+- [x] Applied and reverted event variants in the core model
+- [x] Plugin trait and lifecycle context
+- [x] Unique-name plugin registry
+- [x] Sequential, fail-fast event dispatcher
+- [x] Runtime state and event-chain validation
+- [x] Alloy HTTP JSON-RPC block polling
+- [x] Ordered catch-up across blocks missed between polls
+- [x] Working `raven run` orchestration and Ctrl+C shutdown
+- [x] Built-in block logging
+
+## Near term
+
+- [ ] Reorganization detection and `BlockReverted` emission
+- [ ] Retry and backoff policy for transient RPC failures
+- [ ] Configurable historical starting block
+- [ ] ERC-20 transfer plugin
+- [ ] Richer `raven doctor` diagnostics
+- [ ] Persistent configuration
+
+## Plugin ecosystem
+
+- [ ] Plugin installation and removal
+- [ ] Plugin discovery and registry
+- [ ] Enable and disable controls
+- [ ] Plugin priorities and dependencies
+- [ ] Dynamic loading
+- [ ] Webhook, database, and message-queue sinks
+
+## Event processing
+
+- [ ] DEX swap decoding
+- [ ] Portfolio tracking
+- [ ] Whale tracking
+- [ ] Telegram alerts
+- [ ] SQLite and PostgreSQL sinks
+
+## Sources and scale
+
+- [ ] Reth ExEx source
+- [ ] WebSocket source configuration
+- [ ] Parallel or isolated plugin dispatch policies
+- [ ] Durable checkpoints
+- [ ] Distributed runtime
+
+<Note>
+Roadmap items describe direction, not release commitments. Refer to the CLI
+reference for commands that are executable today.
+</Note>
