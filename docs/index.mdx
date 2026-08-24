@@ -48,14 +48,14 @@ runtime owns lifecycle and dispatch. Plugins own application behavior.
 - Discover the endpoint's EIP-155 chain ID.
 - Reconcile and fetch every observed block height in ascending order.
 - Normalize blocks into source-independent `ChainEvent` values.
+- Persist an RPC URL and override it through the environment or run command.
 - Register plugins by unique name and run their lifecycle.
 - Reject events whose chain ID does not match the active runtime.
 - Shut down cleanly when the CLI receives Ctrl+C.
 
 <Note>
-Raven is early-stage software. Reth ExEx support, reorg detection, dynamic
-plugin installation, and persistent configuration are planned, not yet
-implemented.
+Raven is early-stage software. Reth ExEx support, reorg detection, and dynamic
+plugin installation are planned, not yet implemented.
 </Note>
 
 ## Design principle

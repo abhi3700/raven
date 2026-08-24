@@ -23,15 +23,15 @@ so their result is immediately visible and easy to use in scripts.
 Start the event-processing loop.
 
 ```bash
-raven run --rpc-url <URL> [OPTIONS]
+raven run [--rpc-url <URL>] [OPTIONS]
 ```
 
-| Option                              | Environment    | Default  | Description                                                   |
-| ----------------------------------- | -------------- | -------- | ------------------------------------------------------------- |
-| `--rpc-url <URL>`                   | `NODE_RPC_URL` | Required | Ethereum-compatible HTTP(S) or WS(S) JSON-RPC endpoint        |
-| `--source <SOURCE>`                 | —              | `alloy`  | Event source; currently only `alloy`                          |
-| `--poll-interval-ms <MS>`           | —              | `4000`   | HTTP(S) block-number poll interval; must be greater than zero |
-| `--reconciliation-interval-ms <MS>` | —              | `30000`  | WS(S) safety reconciliation; must be greater than zero        |
+| Option                              | Environment    | Default      | Description                                                   |
+| ----------------------------------- | -------------- | ------------ | ------------------------------------------------------------- |
+| `--rpc-url <URL>`                   | `NODE_RPC_URL` | Saved config | Ethereum-compatible HTTP(S) or WS(S) JSON-RPC endpoint        |
+| `--source <SOURCE>`                 | —              | `alloy`      | Event source; currently only `alloy`                          |
+| `--poll-interval-ms <MS>`           | —              | `4000`       | HTTP(S) block-number poll interval; must be greater than zero |
+| `--reconciliation-interval-ms <MS>` | —              | `30000`      | WS(S) safety reconciliation; must be greater than zero        |
 
 Example:
 
@@ -46,6 +46,20 @@ The endpoint may use `http://`, `https://`, `ws://`, or `wss://`. HTTP(S) uses
 the polling interval. WS(S) uses `eth_subscribe("newHeads")` as its primary
 trigger and the reconciliation interval as a safety check. Both feed the same
 ordered full-block catch-up path.
+
+The RPC URL is resolved before Raven starts:
+
+```text
+--rpc-url  ─►  NODE_RPC_URL  ─►  config.json  ─►  error with setup instructions
+```
+
+An explicit flag therefore overrides the environment, and the environment
+overrides persisted config. If all three are absent, `raven run` exits with:
+
+```text
+Error: no RPC URL configured
+  pass `--rpc-url <URL>`, set `NODE_RPC_URL`, or run `raven config set --rpc-url <URL>`
+```
 
 ## `raven plugins list`
 
@@ -107,15 +121,56 @@ raven doctor
 This is a lightweight binary check. It does not currently test RPC
 connectivity, storage, or plugin loading.
 
-## `raven config`
+## `raven config set`
 
-Print the effective `NODE_RPC_URL` environment value:
+Validate and persist an RPC endpoint:
 
 ```bash
-raven config
+raven config set --rpc-url wss://eth.drpc.org
 ```
 
-Persistent configuration files are not implemented yet.
+The command accepts `http`, `https`, `ws`, and `wss` URLs. It writes through a
+temporary file before replacement and uses owner-only file permissions on Unix
+because endpoint URLs may contain provider credentials.
+
+## `raven config get`
+
+Print the persisted RPC URL and config path:
+
+```bash
+raven config get
+```
+
+Example output:
+
+```yaml
+rpc_url: https://ethereum-rpc.publicnode.com
+config_file: /Users/example/Library/Application Support/raven/config.json
+```
+
+This reports persisted state only. It does not replace the value with a
+temporary `NODE_RPC_URL` override.
+
+## `raven config clear`
+
+Remove all persisted Raven configuration:
+
+```bash
+raven config clear
+```
+
+Clearing is idempotent: running it when no config file exists still succeeds.
+
+Raven stores the file in the native per-user config directory:
+
+| Platform | Default path |
+| --- | --- |
+| macOS | `~/Library/Application Support/raven/config.json` |
+| Linux and other Unix | `$XDG_CONFIG_HOME/raven/config.json`, or `~/.config/raven/config.json` |
+| Windows | `%APPDATA%\raven\config.json` |
+
+Set `RAVEN_CONFIG_DIR` to override the directory, which is especially useful
+for isolated development and automated tests.
 
 ## Logging
 

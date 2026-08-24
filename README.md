@@ -40,12 +40,12 @@ the runtime owns lifecycle and dispatch, and plugins own application logic.
 - Error isolation and panic quarantine without blocking sibling plugins
 - Runtime state and chain-ID validation
 - Transport-aware Alloy ingestion: HTTP polling or WS subscriptions with reconciliation
+- Persistent RPC URL configuration with CLI and environment overrides
 - Working CLI orchestration with graceful Ctrl+C shutdown
 - Normalized event boundary designed for future Reth ExEx support
 
 > **Important:** Raven is early-stage. Reorg detection, dynamic plugin
-> installation, persistent configuration, and Reth ExEx integration are planned
-> but not yet implemented.
+> installation, and Reth ExEx integration are planned but not yet implemented.
 
 ## Getting started
 
@@ -75,18 +75,30 @@ cargo run -p raven -- run \
   --rpc-url https://ethereum-rpc.publicnode.com
 ```
 
-Or configure it through the environment:
+Persist the endpoint once and then run without repeating it:
+
+```bash
+raven config set --rpc-url http://localhost:8545
+raven config get
+raven run
+```
+
+You can also configure it for the current environment:
 
 ```bash
 export NODE_RPC_URL="http://localhost:8545"
 cargo run -p raven -- run
 ```
 
-WebSocket endpoints work through the same option or environment variable:
+WebSocket endpoints work through persisted config, the option, or the
+environment variable:
 
 ```bash
 raven run --rpc-url wss://eth.drpc.org
 ```
+
+Resolution order is `--rpc-url`, then `NODE_RPC_URL`, then persisted config.
+Run `raven config clear` to remove the persisted value.
 
 Raven discovers the endpoint's chain ID, fetches full blocks, sends normalized
 events through the runtime, and logs each block with the built-in

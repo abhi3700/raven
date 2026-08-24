@@ -27,8 +27,11 @@ pub(crate) enum Command {
 	/// Inspect the Raven installation and configuration.
 	Doctor,
 
-	/// Print Raven configuration.
-	Config,
+	/// Manage persistent Raven configuration.
+	Config {
+		#[command(subcommand)]
+		command: ConfigCommand,
+	},
 }
 
 /// Configuration for the event-processing loop.
@@ -40,7 +43,7 @@ pub(crate) struct RunArgs {
 
 	/// Ethereum-compatible HTTP(S) or WS(S) JSON-RPC endpoint.
 	#[arg(long, env = "NODE_RPC_URL")]
-	pub(crate) rpc_url: String,
+	pub(crate) rpc_url: Option<String>,
 
 	/// HTTP(S) block-number polling interval.
 	#[arg(long, default_value_t = 4_000, value_parser = clap::value_parser!(u64).range(1..))]
@@ -57,6 +60,23 @@ pub(crate) enum EventSource {
 	/// Ingest an Ethereum JSON-RPC endpoint through Alloy.
 	#[default]
 	Alloy,
+}
+
+/// Persistent-configuration commands.
+#[derive(Debug, Subcommand)]
+pub(crate) enum ConfigCommand {
+	/// Save the RPC URL used by `raven run` when no override is provided.
+	Set {
+		/// Ethereum-compatible HTTP(S) or WS(S) JSON-RPC endpoint.
+		#[arg(long)]
+		rpc_url: String,
+	},
+
+	/// Print the persisted Raven configuration.
+	Get,
+
+	/// Remove all persisted Raven configuration.
+	Clear,
 }
 
 /// Plugin-management commands.
@@ -103,7 +123,7 @@ mod tests {
 		};
 
 		assert!(matches!(args.source, EventSource::Alloy));
-		assert_eq!(args.rpc_url, "http://localhost:8545");
+		assert_eq!(args.rpc_url.as_deref(), Some("http://localhost:8545"));
 		assert_eq!(args.poll_interval_ms, 1_000);
 		assert_eq!(args.reconciliation_interval_ms, 30_000);
 	}
@@ -120,6 +140,37 @@ mod tests {
 		]);
 
 		assert!(result.is_err());
+	}
+
+	#[test]
+	fn permits_run_without_rpc_url_for_persisted_config_resolution() {
+		let cli = Cli::try_parse_from(["raven", "run"]).expect("config may supply the RPC URL");
+
+		let Some(Command::Run(args)) = cli.command else {
+			panic!("run command should be selected");
+		};
+
+		assert!(args.rpc_url.is_none());
+	}
+
+	#[test]
+	fn parses_config_commands() {
+		let set =
+			Cli::try_parse_from(["raven", "config", "set", "--rpc-url", "wss://ethereum.example"])
+				.expect("config set should parse");
+		assert!(matches!(
+			set.command,
+			Some(Command::Config {
+				command: ConfigCommand::Set { rpc_url }
+			}) if rpc_url == "wss://ethereum.example"
+		));
+
+		let get = Cli::try_parse_from(["raven", "config", "get"]).expect("config get should parse");
+		assert!(matches!(get.command, Some(Command::Config { command: ConfigCommand::Get })));
+
+		let clear =
+			Cli::try_parse_from(["raven", "config", "clear"]).expect("config clear should parse");
+		assert!(matches!(clear.command, Some(Command::Config { command: ConfigCommand::Clear })));
 	}
 
 	#[test]

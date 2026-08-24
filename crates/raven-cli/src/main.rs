@@ -1,10 +1,11 @@
 mod cli;
+mod config;
 mod runner;
 
 use std::process::ExitCode;
 
 use clap::{CommandFactory, Parser};
-use cli::{Cli, Command, PluginCommand};
+use cli::{Cli, Command, ConfigCommand, PluginCommand};
 use colored::Colorize;
 use eyre::{Result, bail};
 
@@ -26,8 +27,9 @@ async fn run_cli() -> Result<()> {
 
 	match cli.command {
 		Some(Command::Run(args)) => {
+			let rpc_url = config::resolve_rpc_url(args.rpc_url.as_deref())?;
 			print_banner();
-			runner::run(args).await?;
+			runner::run(args, rpc_url).await?;
 		},
 
 		Some(Command::Plugins { command }) => match command {
@@ -58,9 +60,7 @@ async fn run_cli() -> Result<()> {
 			println!("{} Raven CLI {}", "✔".green(), env!("CARGO_PKG_VERSION"));
 		},
 
-		Some(Command::Config) => {
-			print_configuration();
-		},
+		Some(Command::Config { command }) => handle_config_command(command)?,
 
 		None => {
 			print_banner();
@@ -94,11 +94,33 @@ fn init_tracing() {
 		.init();
 }
 
-fn print_configuration() {
-	match std::env::var("NODE_RPC_URL") {
-		Ok(rpc_url) => println!("NODE_RPC_URL={rpc_url}"),
-		Err(_) => println!("{}", "NODE_RPC_URL is not set.".yellow()),
+fn handle_config_command(command: ConfigCommand) -> Result<()> {
+	match command {
+		ConfigCommand::Set { rpc_url } => {
+			let path = config::set_rpc_url(&rpc_url)?;
+			println!("{} RPC URL saved", "✔".green());
+			println!("  {}", path.display());
+		},
+		ConfigCommand::Get => {
+			let (path, rpc_url) = config::get_rpc_url()?;
+			match rpc_url {
+				Some(rpc_url) => println!("rpc_url: {rpc_url}"),
+				None => println!("{}", "No persisted RPC URL is configured.".yellow()),
+			}
+			println!("config_file: {}", path.display());
+		},
+		ConfigCommand::Clear => {
+			let (path, removed) = config::clear()?;
+			if removed {
+				println!("{} Persistent Raven configuration cleared", "✔".green());
+			} else {
+				println!("{}", "Persistent Raven configuration is already clear.".yellow());
+			}
+			println!("  {}", path.display());
+		},
 	}
+
+	Ok(())
 }
 
 fn print_banner() {

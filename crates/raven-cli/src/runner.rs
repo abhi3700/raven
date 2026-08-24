@@ -17,9 +17,9 @@ use crate::cli::{EventSource, RunArgs};
 const EVENT_CHANNEL_CAPACITY: usize = 256;
 
 /// Runs the configured event source until it stops or the user presses Ctrl+C.
-pub(crate) async fn run(args: RunArgs) -> Result<()> {
+pub(crate) async fn run(args: RunArgs, rpc_url: String) -> Result<()> {
 	let (event_sender, mut event_receiver) = mpsc::channel(EVENT_CHANNEL_CAPACITY);
-	let source_task = spawn_source(&args, event_sender);
+	let source_task = spawn_source(&args, rpc_url, event_sender);
 	let mut runtime = None;
 
 	info!(source = ?args.source, "Raven is running; press Ctrl+C to stop");
@@ -61,13 +61,17 @@ pub(crate) async fn run(args: RunArgs) -> Result<()> {
 	shutdown_result
 }
 
-fn spawn_source(args: &RunArgs, event_sender: mpsc::Sender<ChainEvent>) -> JoinHandle<Result<()>> {
+fn spawn_source(
+	args: &RunArgs,
+	rpc_url: String,
+	event_sender: mpsc::Sender<ChainEvent>,
+) -> JoinHandle<Result<()>> {
 	let poll_interval = Duration::from_millis(args.poll_interval_ms);
 	let reconciliation_interval = Duration::from_millis(args.reconciliation_interval_ms);
 
 	match args.source {
 		EventSource::Alloy => {
-			let source = AlloySource::new(args.rpc_url.clone())
+			let source = AlloySource::new(rpc_url)
 				.with_poll_interval(poll_interval)
 				.with_reconciliation_interval(reconciliation_interval);
 

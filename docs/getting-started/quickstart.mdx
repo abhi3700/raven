@@ -8,10 +8,24 @@ description: "Connect Raven to an EVM JSON-RPC endpoint and process live block e
 Raven supports Ethereum-compatible HTTP(S) and WebSocket (WS/WSS) JSON-RPC
 endpoints through Alloy. You may use a local node or a hosted provider.
 
-Set the endpoint once for the current shell:
+Persist the endpoint once:
+
+```bash
+raven config set --rpc-url http://localhost:8545
+raven config get
+```
+
+Or set it only for the current shell:
 
 ```bash
 export NODE_RPC_URL="http://localhost:8545"
+```
+
+RPC URL resolution follows this precedence:
+
+```text
+--rpc-url  ─►  NODE_RPC_URL  ─►  persisted config  ─►  actionable error
+ highest                                                   lowest
 ```
 
 ## 2. Start Raven
@@ -34,6 +48,12 @@ For a WebSocket endpoint:
 
 ```bash
 raven run --rpc-url wss://eth.drpc.org
+```
+
+Remove the persisted value when it is no longer needed:
+
+```bash
+raven config clear
 ```
 
 Raven discovers the remote chain ID, fetches full blocks, and passes normalized
