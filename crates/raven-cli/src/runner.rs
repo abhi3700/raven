@@ -63,10 +63,13 @@ pub(crate) async fn run(args: RunArgs) -> Result<()> {
 
 fn spawn_source(args: &RunArgs, event_sender: mpsc::Sender<ChainEvent>) -> JoinHandle<Result<()>> {
 	let poll_interval = Duration::from_millis(args.poll_interval_ms);
+	let reconciliation_interval = Duration::from_millis(args.reconciliation_interval_ms);
 
 	match args.source {
 		EventSource::Alloy => {
-			let source = AlloySource::new(args.rpc_url.clone()).with_poll_interval(poll_interval);
+			let source = AlloySource::new(args.rpc_url.clone())
+				.with_poll_interval(poll_interval)
+				.with_reconciliation_interval(reconciliation_interval);
 
 			tokio::spawn(async move { source.run(event_sender).await.map_err(Into::into) })
 		},

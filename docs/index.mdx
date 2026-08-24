@@ -44,9 +44,9 @@ runtime owns lifecycle and dispatch. Plugins own application behavior.
 
 ## Current capabilities
 
-- Poll any standard Ethereum-compatible HTTP(S) or WS(S) JSON-RPC endpoint with Alloy.
+- Ingest from Ethereum-compatible HTTP(S) polling or WS(S) subscriptions with Alloy.
 - Discover the endpoint's EIP-155 chain ID.
-- Fetch every block observed between polling intervals in ascending order.
+- Reconcile and fetch every observed block height in ascending order.
 - Normalize blocks into source-independent `ChainEvent` values.
 - Register plugins by unique name and run their lifecycle.
 - Reject events whose chain ID does not match the active runtime.

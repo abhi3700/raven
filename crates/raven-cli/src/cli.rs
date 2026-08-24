@@ -42,15 +42,19 @@ pub(crate) struct RunArgs {
 	#[arg(long, env = "NODE_RPC_URL")]
 	pub(crate) rpc_url: String,
 
-	/// Delay between block-number polls.
+	/// HTTP(S) block-number polling interval.
 	#[arg(long, default_value_t = 4_000, value_parser = clap::value_parser!(u64).range(1..))]
 	pub(crate) poll_interval_ms: u64,
+
+	/// WS(S) safety interval for reconciling missed block notifications.
+	#[arg(long, default_value_t = 30_000, value_parser = clap::value_parser!(u64).range(1..))]
+	pub(crate) reconciliation_interval_ms: u64,
 }
 
 /// Event sources supported by the CLI.
 #[derive(Debug, Clone, Copy, Default, ValueEnum)]
 pub(crate) enum EventSource {
-	/// Poll an Ethereum JSON-RPC endpoint through Alloy.
+	/// Ingest an Ethereum JSON-RPC endpoint through Alloy.
 	#[default]
 	Alloy,
 }
@@ -101,6 +105,7 @@ mod tests {
 		assert!(matches!(args.source, EventSource::Alloy));
 		assert_eq!(args.rpc_url, "http://localhost:8545");
 		assert_eq!(args.poll_interval_ms, 1_000);
+		assert_eq!(args.reconciliation_interval_ms, 30_000);
 	}
 
 	#[test]
@@ -111,6 +116,20 @@ mod tests {
 			"--rpc-url",
 			"http://localhost:8545",
 			"--poll-interval-ms",
+			"0",
+		]);
+
+		assert!(result.is_err());
+	}
+
+	#[test]
+	fn rejects_zero_reconciliation_interval() {
+		let result = Cli::try_parse_from([
+			"raven",
+			"run",
+			"--rpc-url",
+			"ws://localhost:8546",
+			"--reconciliation-interval-ms",
 			"0",
 		]);
 

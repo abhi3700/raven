@@ -37,8 +37,9 @@ overlap when it does not require an undecided contract.
 - [x] Handler-error isolation and per-worker panic quarantine
 - [x] Concurrent plugin startup and graceful parallel drain on shutdown
 - [x] Runtime state and event-chain validation
-- [x] Alloy HTTP(S) and WS(S) JSON-RPC block polling
-- [x] Ordered catch-up across blocks missed between polls
+- [x] Alloy HTTP(S) JSON-RPC block polling
+- [x] Alloy WS(S) `newHeads` subscription with periodic reconciliation
+- [x] Ordered catch-up across blocks missed between polls or notifications
 - [x] Working `raven run` orchestration and Ctrl+C shutdown
 - [x] Built-in block logging
 
@@ -132,7 +133,8 @@ not-implemented errors until this phase.
   event model.
 - [ ] Compare Alloy and Reth behavior, then extract a shared source trait if the
   two implementations demonstrate a useful common interface.
-- [ ] Add WebSocket ingestion only with a fallback and reconnection contract.
+- [x] Use WebSocket subscriptions with ordered height-gap reconciliation.
+- [ ] Define Raven-level terminal reconnect policy and checkpoint-based resume.
 - [ ] Add configurable per-plugin timeouts, restart supervision, health status,
   and dead-letter handling while preserving current FIFO guarantees.
 - [ ] Add durable queues or a distributed runtime only after profiling shows a

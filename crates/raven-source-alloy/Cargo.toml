@@ -9,6 +9,7 @@ rust-version.workspace = true
 [dependencies]
 alloy.workspace = true
 dotenvy = "0.15.7"
+futures-util.workspace = true
 raven-core = { path = "../raven-core" }
 thiserror.workspace = true
 tokio.workspace = true

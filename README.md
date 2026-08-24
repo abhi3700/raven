@@ -15,7 +15,7 @@
 
 ## Why Raven?
 
-Blockchain applications often rebuild the same RPC polling, block
+Blockchain applications often rebuild the same RPC ingestion, block
 normalization, and event dispatch pipeline. Raven separates that infrastructure
 from application behavior:
 
@@ -39,7 +39,7 @@ the runtime owns lifecycle and dispatch, and plugins own application logic.
 - Non-blocking fan-out, immediate delivery receipts, and live per-plugin outcomes
 - Error isolation and panic quarantine without blocking sibling plugins
 - Runtime state and chain-ID validation
-- Ordered block polling through Alloy
+- Transport-aware Alloy ingestion: HTTP polling or WS subscriptions with reconciliation
 - Working CLI orchestration with graceful Ctrl+C shutdown
 - Normalized event boundary designed for future Reth ExEx support
 
@@ -88,9 +88,11 @@ WebSocket endpoints work through the same option or environment variable:
 raven run --rpc-url wss://eth.drpc.org
 ```
 
-Raven discovers the endpoint's chain ID, polls for blocks, sends normalized
+Raven discovers the endpoint's chain ID, fetches full blocks, sends normalized
 events through the runtime, and logs each block with the built-in
-`block-logger` plugin. Press Ctrl+C to shut down cleanly.
+`block-logger` plugin. HTTP(S) polls for new heights; WS(S) subscribes to
+`newHeads` and periodically reconciles missed heights. Press Ctrl+C to shut
+down cleanly.
 
 Tune the polling interval when needed:
 
@@ -98,6 +100,14 @@ Tune the polling interval when needed:
 cargo run -p raven -- run \
   --rpc-url http://localhost:8545 \
   --poll-interval-ms 1000
+```
+
+For WS(S), tune the lower-frequency safety reconciliation independently:
+
+```bash
+raven run \
+  --rpc-url wss://eth.drpc.org \
+  --reconciliation-interval-ms 30000
 ```
 
 Use `cargo run -p raven -- --help` for the full CLI help.

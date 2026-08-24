@@ -36,18 +36,20 @@ For a WebSocket endpoint:
 raven run --rpc-url wss://eth.drpc.org
 ```
 
-Raven discovers the remote chain ID, polls the current block number, fetches
-full blocks, and passes normalized events through the runtime. The CLI's built-in
-`block-logger` plugin logs each processed block.
+Raven discovers the remote chain ID, fetches full blocks, and passes normalized
+events through the runtime. HTTP(S) endpoints use block-number polling. WS(S)
+endpoints use `newHeads` subscriptions for immediate notification plus a slower
+safety reconciliation. The CLI's built-in `block-logger` plugin logs each
+processed block.
 
 ## 3. Stop cleanly
 
 Press Ctrl+C. Raven stops the source task and calls `shutdown()` on each started
 plugin before exiting.
 
-## Tune polling
+## Tune ingestion intervals
 
-The default polling interval is 4,000 milliseconds:
+The default HTTP polling interval is 4,000 milliseconds:
 
 ```bash
 raven run \
@@ -57,6 +59,19 @@ raven run \
 
 The interval must be at least one millisecond. A shorter interval detects new
 blocks sooner but makes more `eth_blockNumber` requests.
+
+WebSocket endpoints do not poll every four seconds. They subscribe to new heads
+and reconcile the latest height every 30,000 milliseconds by default:
+
+```bash
+raven run \
+  --rpc-url wss://eth.drpc.org \
+  --reconciliation-interval-ms 60000
+```
+
+Reconciliation recovers height gaps after a missed notification or reconnect.
+A longer interval reduces safety requests but increases the worst-case time to
+discover such a gap. Both interval values must be greater than zero.
 
 <Warning>
     The Alloy source currently starts from the latest block observed at startup
@@ -79,6 +94,6 @@ blocks sooner but makes more `eth_blockNumber` requests.
         icon="radio"
         href="/docs/guides/alloy-source"
     >
-        Learn the polling and delivery guarantees.
+        Learn the subscription, polling, and catch-up guarantees.
     </Card>
 </CardGroup>

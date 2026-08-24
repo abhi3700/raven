@@ -3302,6 +3302,7 @@ dependencies = [
  "async-trait",
  "dotenvy",
  "eyre",
+ "futures-util",
  "raven-core",
  "raven-plugin-sdk",
  "raven-runtime",

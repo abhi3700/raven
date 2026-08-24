@@ -9,6 +9,9 @@ pub enum AlloySourceError {
 	#[error("poll interval must be greater than zero")]
 	InvalidPollInterval,
 
+	#[error("WebSocket reconciliation interval must be greater than zero")]
+	InvalidReconciliationInterval,
+
 	#[error("failed to connect to RPC endpoint: {0}")]
 	Connection(String),
 
@@ -20,6 +23,12 @@ pub enum AlloySourceError {
 
 	#[error("failed to retrieve block data: {0}")]
 	BlockRequest(String),
+
+	#[error("failed to subscribe to new block headers: {0}")]
+	Subscription(String),
+
+	#[error("new block header subscription ended")]
+	SubscriptionEnded,
 
 	#[error("failed to normalize block: {0}")]
 	BlockConversion(String),

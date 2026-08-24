@@ -1,60 +1,93 @@
 ---
 title: "Alloy event source"
-description: "How Raven polls JSON-RPC, catches up missed blocks, and delivers normalized events."
+description: "How Raven combines HTTP polling or WebSocket subscriptions with ordered block reconciliation."
 ---
 
-`AlloySource` is Raven's current chain adapter. It works with standard HTTP(S)
-and WebSocket (WS/WSS) Ethereum JSON-RPC endpoints and publishes normalized
-events through a bounded Tokio channel.
+`AlloySource` is Raven's current chain adapter. It connects to Ethereum-compatible
+HTTP(S) and WS(S) JSON-RPC endpoints, fetches full blocks, converts them into
+normalized `ChainEvent` values, and publishes them through a bounded Tokio
+channel.
 
-## Transport selection
+## Production strategy
 
-Alloy selects the transport from the endpoint scheme. Raven keeps one source
-contract and one polling algorithm across both transports:
+Raven chooses the ingestion strategy from the URL scheme:
 
 ```mermaid
 flowchart LR
     url[RPC URL] --> scheme{URL scheme}
-    scheme -->|http or https| http[HTTP transport]
-    scheme -->|ws or wss| ws[WebSocket transport]
-    http --> provider[Alloy Provider]
-    ws --> provider
-    provider --> polling[Ordered block polling and catch-up]
-    polling --> events[Normalized ChainEvent values]
+    scheme -->|http or https| polling[Poll eth_blockNumber every 4s]
+    scheme -->|ws or wss| heads[Subscribe to newHeads]
+    heads --> immediate[Immediate target height]
+    scheme -->|ws or wss| safety[Reconcile eth_blockNumber every 30s]
+    polling --> catchup[Ordered catch-up]
+    immediate --> catchup
+    safety --> catchup
+    catchup --> fetch[Fetch full blocks by number]
+    fetch --> events[Normalized ChainEvent values]
 ```
 
-WebSocket support establishes a persistent WS/WSS JSON-RPC connection, but the
-source intentionally continues calling `eth_blockNumber` and
-`eth_getBlockByNumber`. It does not currently switch to `eth_subscribe`, so
-ordering and missed-block catch-up behave identically across transports.
+HTTP is request/response transport, so periodic polling is the portable
+choice. A WebSocket is persistent and supports `eth_subscribe`, so Raven uses
+`newHeads` for low-latency signals rather than polling every few seconds as its
+primary mechanism.
 
-## Polling flow
+Raven deliberately does not use a subscription alone. Ethereum subscriptions
+deliver current events rather than history, are tied to a live connection, and
+may omit intermediate notifications when several blocks arrive close together.
+A slower `eth_blockNumber` reconciliation therefore provides a correctness
+safety net without turning WebSocket operation back into aggressive polling.
 
-```mermaid
-flowchart TD
-    chainId[eth_chainId] --> validate[Validate ChainId]
-    validate --> latest[eth_blockNumber]
-    latest --> poll[Poll latest height]
-    poll --> fetch[Fetch every missing block in order]
-    fetch --> normalize[Build validated BlockEvent]
-    normalize --> event[ChainEvent BlockApplied]
-    event --> channel[Bounded event channel]
-    channel --> poll
+See Alloy's
+[block subscription example](https://alloy.rs/examples/subscriptions/subscribe_blocks/)
+and Geth's
+[subscription considerations](https://geth.ethereum.org/docs/interacting-with-geth/rpc/pubsub)
+for the underlying transport behavior.
+
+## One ordered catch-up path
+
+Both triggers feed the same cursor-based algorithm:
+
+```text
+observed target height N
+        │
+        ▼
+next height > N? ── yes ──► nothing to emit
+        │ no
+        ▼
+fetch next ... N sequentially
+        │
+        ▼
+normalize and send each block
+        │
+        ▼
+advance next height to N + 1
 ```
 
-The source uses polling instead of filter or subscription APIs because public
-providers support them inconsistently.
+A WebSocket header is only a signal that a height is available. Raven does not
+publish the partial header as its block event. It requests every full block
+from the cursor through the signalled height using `eth_getBlockByNumber`.
 
-## Catch-up behavior
+For example, if Raven's next height is 100 and it observes head 103, it emits
+100, 101, 102, and 103 in ascending order. A duplicate or stale notification
+below the cursor does nothing. The same behavior applies when the periodic
+reconciliation discovers a gap.
 
-At startup, the source records the latest block height as the next block to
-fetch. On each poll it fetches every height through the newest observed height,
-in ascending order.
+At startup Raven subscribes before reading the current height, preventing a
+block mined during initialization from falling between those operations. It
+then emits the current head immediately. Alloy reconnects its pub/sub transport
+and restores active subscriptions; Raven's reconciliation closes any height
+gap across that reconnection.
 
-For example, if the next height is 100 and the following poll observes 103,
-Raven requests and emits blocks 100, 101, 102, and 103.
+<Note>
+    Ordered catch-up prevents missing intermediate heights, but it is not reorg
+    handling. A replacement header at an already-emitted height is currently
+    ignored by the monotonic cursor. Canonical ancestry tracking and
+    `BlockReverted` emission remain planned.
+</Note>
 
 ## Configure the source in Rust
+
+HTTP example:
 
 ```rust
 use std::time::Duration;
@@ -76,18 +109,28 @@ while let Some(event) = receiver.recv().await {
 }
 ```
 
-Replace the constructor URL with `ws://...` or `wss://...` to use WebSocket;
-the remaining source code is unchanged.
+WebSocket example:
 
-`AlloySource::run` rejects a zero polling interval before connecting. The CLI
-also validates `--poll-interval-ms` as greater than zero.
+```rust
+use std::time::Duration;
+
+use raven_source_alloy::AlloySource;
+
+let source = AlloySource::new("wss://ethereum.example")
+    .with_reconciliation_interval(Duration::from_secs(30));
+```
+
+The default HTTP poll interval is 4 seconds. The default WS reconciliation
+interval is 30 seconds. `AlloySource::run` rejects a zero value for either
+interval before connecting.
 
 ## Failure behavior
 
 `AlloySource::run` stops and returns an error when:
 
-- It cannot connect to the RPC endpoint.
-- Chain ID or block-number requests fail.
+- It cannot parse or connect to the RPC endpoint.
+- Chain ID, block-number, or full-block requests fail terminally.
+- WebSocket subscription setup fails or the subscription stream ends.
 - The provider omits a requested block.
 - A block cannot be normalized.
 - The event receiver is dropped.
@@ -95,6 +138,6 @@ also validates `--poll-interval-ms` as greater than zero.
 ## Current limitations
 
 - Historical blocks before the startup height are not backfilled.
-- Reorganizations are not detected.
-- `BlockReverted` is never emitted by this source.
-- Retry and exponential backoff policies are not yet implemented.
+- Reorganizations are not detected and `BlockReverted` is not emitted.
+- Raven-level retry classification, jitter, checkpoints, and durable resume are
+  not yet implemented.

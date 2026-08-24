@@ -39,6 +39,49 @@ flowchart TD
 | Plugin | Stateful application behavior for normalized events | Shared chain ingestion |
 | CLI | Source/runtime composition, logging, Ctrl+C, and graceful shutdown | Reusable domain logic |
 
+### Transport-aware source ingestion
+
+At the high level, transport affects how Raven learns that a new height exists;
+it does not change event normalization or downstream dispatch:
+
+```mermaid
+flowchart LR
+    http[HTTP or HTTPS] --> poll[Periodic latest-height poll]
+    ws[WS or WSS] --> subscribe[newHeads subscription]
+    ws --> reconcile[Slower latest-height reconciliation]
+    poll --> cursor[Ordered height cursor]
+    subscribe --> cursor
+    reconcile --> cursor
+    cursor --> fullBlocks[Full block fetch and normalization]
+    fullBlocks --> sourceQueue[Bounded source channel]
+```
+
+HTTP(S) polls `eth_blockNumber` every four seconds by default. WS(S) uses
+`eth_subscribe("newHeads")` for immediate signals and checks `eth_blockNumber`
+every 30 seconds by default as a safety net. Subscription notifications are not
+treated as a complete or durable event log.
+
+At the low level, both paths update one monotonic `next_block_number` cursor:
+
+```text
+head notification or reconciliation returns target N
+    └─► for height in next_block_number..=N
+            ├─► eth_getBlockByNumber(height)
+            ├─► convert to ChainEvent::BlockApplied
+            ├─► send through bounded source channel
+            └─► advance cursor
+```
+
+Subscribing before reading the initial height closes the startup race. Fetching
+all heights through each target closes intermediate gaps when notifications are
+coalesced or missed. Duplicate and stale notifications below the cursor are
+ignored. Periodic reconciliation closes gaps across WebSocket lag or reconnect,
+while Alloy owns transport reconnection and subscription restoration.
+
+This monotonic cursor is not yet reorg-aware: a replacement block at an already
+emitted height requires canonical ancestry tracking and `BlockReverted` events,
+which remain planned.
+
 ### Runtime topology
 
 ```mermaid

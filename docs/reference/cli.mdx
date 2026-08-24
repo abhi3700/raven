@@ -26,11 +26,12 @@ Start the event-processing loop.
 raven run --rpc-url <URL> [OPTIONS]
 ```
 
-| Option                    | Environment    | Default  | Description                                              |
-| ------------------------- | -------------- | -------- | -------------------------------------------------------- |
-| `--rpc-url <URL>`         | `NODE_RPC_URL` | Required | Ethereum-compatible HTTP(S) or WS(S) JSON-RPC endpoint   |
-| `--source <SOURCE>`       | —              | `alloy`  | Event source; currently only `alloy`                     |
-| `--poll-interval-ms <MS>` | —              | `4000`   | Block-number polling interval; must be greater than zero |
+| Option                              | Environment    | Default  | Description                                                   |
+| ----------------------------------- | -------------- | -------- | ------------------------------------------------------------- |
+| `--rpc-url <URL>`                   | `NODE_RPC_URL` | Required | Ethereum-compatible HTTP(S) or WS(S) JSON-RPC endpoint        |
+| `--source <SOURCE>`                 | —              | `alloy`  | Event source; currently only `alloy`                          |
+| `--poll-interval-ms <MS>`           | —              | `4000`   | HTTP(S) block-number poll interval; must be greater than zero |
+| `--reconciliation-interval-ms <MS>` | —              | `30000`  | WS(S) safety reconciliation; must be greater than zero        |
 
 Example:
 
@@ -41,8 +42,10 @@ raven run \
   --poll-interval-ms 1000
 ```
 
-The endpoint may use `http://`, `https://`, `ws://`, or `wss://`. Raven uses
-the same ordered polling and catch-up behavior over both HTTP and WebSocket.
+The endpoint may use `http://`, `https://`, `ws://`, or `wss://`. HTTP(S) uses
+the polling interval. WS(S) uses `eth_subscribe("newHeads")` as its primary
+trigger and the reconciliation interval as a safety check. Both feed the same
+ordered full-block catch-up path.
 
 ## `raven plugins list`
 
