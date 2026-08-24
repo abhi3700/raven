@@ -172,6 +172,7 @@ cargo run -p raven-plugin-sdk --example block_logger
 
 ```text
 raven/
+├── CHANGELOG.md            # Weekly commit-derived project history
 ├── crates/
 │   ├── raven-cli/           # CLI and source/runtime orchestration
 │   ├── raven-core/          # Validated normalized chain events
@@ -192,6 +193,9 @@ The complete Mintlify documentation starts at
 
 The [design principles](./docs/concepts/design-principles.mdx) reconcile the
 project vision with current architectural boundaries.
+
+Development history is summarized by UTC ISO week in the
+[changelog](./CHANGELOG.md), with links back to every source commit.
 
 Preview the site locally with Node.js 20.17 or newer:
 
