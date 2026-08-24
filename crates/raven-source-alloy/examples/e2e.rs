@@ -3,7 +3,7 @@
 //! Flow:
 //!
 //! ```text
-//! Ethereum RPC
+//! EVM JSON-RPC
 //!     ↓
 //! AlloySource
 //!     ↓
@@ -17,24 +17,22 @@
 //! Run with:
 //!
 //! ```sh
-//! NODE_RPC_URL=https://ethereum-rpc.publicnode.com \
+//! NODE_RPC_URL=https://your-evm-rpc.example \
 //! cargo run -p raven-source-alloy --example e2e
 //! ```
 //!
-//! Expected output:
+//! The endpoint's chain ID is discovered at runtime. Example output:
 //! ```
-//! 2026-07-13T13:42:11.967800Z  INFO raven_source_alloy::source: connecting Alloy event source rpc_url=https://ethereum-rpc.publicnode.com
-//! 2026-07-13T13:42:12.434912Z  INFO raven_source_alloy::source: connected Alloy event source chain_id=1
-//! block=#25524074   txs=25   hash=0x5e14f42e3f0e11c4f0cd26a6dc94632127757c490f456f2c98b622b31cac05c0
-//! block=#25524075   txs=250  hash=0xaeb0c67d77f9eb0838ca977320ef4b3db3af7551a7cfdae3f8cb7e85b6a111ad
-//! block=#25524076   txs=41   hash=0xd1e281350730f1a1a2a174c7a9aa9a1d7b0f00a0a1a9ec64ac5595b624042652
-//! block=#25524077   txs=222  hash=0xafe4b696a2310cf8b22a0f8e960b65b6b7a5b5c152f062c17dc1be161b6381ee
+//! INFO raven_source_alloy::source: connected HTTP polling event source chain_id=8453
+//! INFO e2e: plugin started plugin="block-logger" chain_id=8453
+//! block=#12345678   txs=25   hash=0x...
 //! ```
 
 use std::{env, time::Duration};
 
 use async_trait::async_trait;
-use raven_core::{ChainEvent, ChainId};
+use eyre::WrapErr;
+use raven_core::ChainEvent;
 use raven_plugin_sdk::{Plugin, PluginContext, PluginMetadata, PluginResult};
 use raven_runtime::Runtime;
 use raven_source_alloy::AlloySource;
@@ -42,7 +40,6 @@ use tokio::sync::mpsc;
 use tracing::{error, info};
 
 const EVENT_CHANNEL_CAPACITY: usize = 256;
-const DEFAULT_RPC_URL: &str = "https://ethereum-rpc.publicnode.com";
 
 /// Minimal plugin that prints every normalized block event.
 ///
@@ -94,28 +91,16 @@ async fn main() -> eyre::Result<()> {
 	init_tracing();
 
 	dotenvy::dotenv().ok();
-	dotenvy::from_path("./.env").expect("Failed to get the .env file");
-
-	let rpc_url = env::var("NODE_RPC_URL").unwrap_or_else(|_| DEFAULT_RPC_URL.to_owned());
-
-	/*
-	 * The current example assumes Ethereum mainnet because Runtime requires
-	 * a ChainId before the Alloy source starts.
-	 *
-	 * The Alloy source independently verifies the RPC chain ID and embeds it
-	 * into every produced ChainEvent. Runtime::process() rejects events from
-	 * another chain.
-	 */
-	let mut runtime = Runtime::new(ChainId::ETHEREUM);
-
-	runtime.register_plugin(BlockLoggerPlugin)?;
-	runtime.start().await?;
+	let rpc_url = env::var("NODE_RPC_URL").wrap_err(
+		"NODE_RPC_URL is required; provide any EVM-compatible HTTP(S) or WS(S) endpoint",
+	)?;
 
 	let (event_sender, mut event_receiver) = mpsc::channel(EVENT_CHANNEL_CAPACITY);
 
 	let source = AlloySource::new(rpc_url).with_poll_interval(Duration::from_secs(4));
 
 	let source_task = tokio::spawn(async move { source.run(event_sender).await });
+	let mut runtime = None;
 
 	info!("Raven is running. Press Ctrl+C to stop.");
 
@@ -130,7 +115,19 @@ async fn main() -> eyre::Result<()> {
 			maybe_event = event_receiver.recv() => {
 				match maybe_event {
 					Some(event) => {
-						runtime.process(event).await?;
+						if runtime.is_none() {
+							let chain_id = event.chain_id();
+							let mut discovered_runtime = Runtime::new(chain_id);
+							discovered_runtime.register_plugin(BlockLoggerPlugin)?;
+							discovered_runtime.start().await?;
+							runtime = Some(discovered_runtime);
+						}
+
+						runtime
+							.as_mut()
+							.expect("runtime is initialized from the first event")
+							.process(event)
+							.await?;
 					}
 
 					None => {
@@ -142,29 +139,22 @@ async fn main() -> eyre::Result<()> {
 		}
 	}
 
-	/*
-	 * AlloySource::run() is a long-running stream. Once Ctrl+C is received,
-	 * abort the source task and then shut down all registered plugins.
-	 */
+	// Stop source work, then preserve its result while cleanup still runs.
 	source_task.abort();
 
-	match source_task.await {
-		Ok(Ok(())) => {},
+	let source_result = match source_task.await {
+		Ok(result) => result.map_err(eyre::Report::from),
+		Err(error) if error.is_cancelled() => Ok(()),
+		Err(error) => Err(error.into()),
+	};
 
-		Ok(Err(error)) => {
-			return Err(error.into());
-		},
+	let shutdown_result = match runtime {
+		Some(mut runtime) => runtime.shutdown().await.map_err(eyre::Report::from),
+		None => Ok(()),
+	};
 
-		Err(error) if error.is_cancelled() => {},
-
-		Err(error) => {
-			return Err(error.into());
-		},
-	}
-
-	runtime.shutdown().await?;
-
-	Ok(())
+	source_result?;
+	shutdown_result
 }
 
 fn init_tracing() {

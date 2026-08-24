@@ -5,13 +5,15 @@ description: "Raven's normalized chain event model and the invariants enforced a
 
 ## Chain ID
 
-`ChainId` wraps an EIP-155 numeric chain ID. Zero is rejected.
+`ChainId` wraps an EIP-155 numeric chain ID. Every non-zero `u64` is accepted;
+named constants such as `ETHEREUM` are conveniences rather than a supported-chain
+allowlist.
 
 ```rust
 use raven_core::ChainId;
 
-let ethereum = ChainId::new(1)?;
-assert_eq!(ethereum, ChainId::ETHEREUM);
+let chain = ChainId::new(8_453)?;
+assert_eq!(chain.get(), 8_453);
 ```
 
 ## Block event
@@ -90,7 +92,7 @@ with snake-case variant names:
 {
   "type": "block_applied",
   "data": {
-    "chain_id": 1,
+    "chain_id": 8453,
     "block_number": 21000000,
     "block_hash": "0x1111111111111111111111111111111111111111111111111111111111111111",
     "parent_hash": "0x2222222222222222222222222222222222222222222222222222222222222222",

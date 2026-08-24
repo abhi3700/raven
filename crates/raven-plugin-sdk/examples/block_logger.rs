@@ -19,11 +19,13 @@ pub struct BlockLoggerPlugin;
 #[tokio::main]
 async fn main() -> Result<()> {
 	let mut plugin = BlockLoggerPlugin;
+	// Any non-zero EIP-155 chain ID is valid; this example uses 8453.
+	let chain_id = ChainId::new(8_453)?;
 
-	let context = PluginContext::new(ChainId::ETHEREUM);
+	let context = PluginContext::new(chain_id);
 
 	let block = BlockEvent::new(
-		ChainId::ETHEREUM,
+		chain_id,
 		21_000_000,
 		"0x1111111111111111111111111111111111111111111111111111111111111111",
 		"0x2222222222222222222222222222222222222222222222222222222222222222",

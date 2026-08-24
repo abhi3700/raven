@@ -63,10 +63,16 @@ impl Plugin for BlockLogger {
 use raven_core::ChainId;
 use raven_runtime::Runtime;
 
-let mut runtime = Runtime::new(ChainId::ETHEREUM);
+let chain_id = ChainId::new(8_453)?;
+let mut runtime = Runtime::new(chain_id);
 runtime.register_plugin(BlockLogger)?;
 runtime.start().await?;
 ```
+
+The numeric value above is only an SDK example. `raven run` discovers the
+endpoint's chain ID and constructs the runtime from the first event. Plugins
+can read that value from `PluginContext` and should not assume chain ID 1 unless
+they are intentionally chain-specific.
 
 ## Observe dispatch and execution separately
 

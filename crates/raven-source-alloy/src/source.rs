@@ -40,7 +40,7 @@ const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(4);
 const DEFAULT_RECONCILIATION_INTERVAL: Duration = Duration::from_secs(30);
 const SUBSCRIPTION_CHANNEL_CAPACITY: usize = 256;
 
-/// Streams normalized EVM chain events from an Ethereum JSON-RPC endpoint.
+/// Streams normalized events from an EVM-compatible JSON-RPC endpoint.
 pub struct AlloySource {
 	rpc_url: String,
 	poll_interval: Duration,

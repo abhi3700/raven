@@ -48,9 +48,13 @@ impl ChainEvent {
 mod tests {
 	use super::*;
 
+	fn test_chain_id() -> ChainId {
+		ChainId::new(8_453).expect("test chain ID should be valid")
+	}
+
 	fn block_event() -> BlockEvent {
 		BlockEvent::new(
-			ChainId::ETHEREUM,
+			test_chain_id(),
 			21_000_000,
 			"0x1111111111111111111111111111111111111111111111111111111111111111",
 			"0x2222222222222222222222222222222222222222222222222222222222222222",
@@ -64,7 +68,7 @@ mod tests {
 	fn exposes_applied_event_metadata() {
 		let event = ChainEvent::BlockApplied(block_event());
 
-		assert_eq!(event.chain_id(), ChainId::ETHEREUM);
+		assert_eq!(event.chain_id(), test_chain_id());
 		assert_eq!(event.block_number(), 21_000_000);
 		assert!(event.is_applied());
 		assert!(!event.is_reverted());
@@ -74,7 +78,7 @@ mod tests {
 	fn exposes_reverted_event_metadata() {
 		let event = ChainEvent::BlockReverted(block_event());
 
-		assert_eq!(event.chain_id(), ChainId::ETHEREUM);
+		assert_eq!(event.chain_id(), test_chain_id());
 		assert_eq!(event.block_number(), 21_000_000);
 		assert!(!event.is_applied());
 		assert!(event.is_reverted());

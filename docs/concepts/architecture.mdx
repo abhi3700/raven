@@ -39,6 +39,32 @@ flowchart TD
 | Plugin | Stateful application behavior for normalized events | Shared chain ingestion |
 | CLI | Config persistence, source/runtime composition, logging, Ctrl+C, and graceful shutdown | Reusable domain logic |
 
+### Chain-agnostic runtime binding
+
+Raven has no chain allowlist. The source discovers any non-zero EIP-155 chain
+ID and includes it in every normalized event. The CLI creates the runtime only
+after receiving the first event:
+
+```mermaid
+sequenceDiagram
+    participant RPC as EVM RPC
+    participant Source as AlloySource
+    participant CLI
+    participant Runtime
+    participant Plugin
+
+    Source->>RPC: eth_chainId
+    RPC-->>Source: arbitrary non-zero chain ID
+    Source-->>CLI: first ChainEvent(chain ID)
+    CLI->>Runtime: Runtime::new(event.chain_id())
+    Runtime->>Plugin: start(PluginContext(chain ID))
+    CLI->>Runtime: process(first event)
+```
+
+A runtime remains single-chain by design: after binding, it rejects events with
+a different chain ID. This protects per-plugin ordering and state. Multi-chain
+deployments currently run one Raven process per RPC endpoint.
+
 ### Transport-aware source ingestion
 
 At the high level, transport affects how Raven learns that a new height exists;

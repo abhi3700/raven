@@ -191,9 +191,10 @@ mod tests {
 	use super::*;
 
 	#[tokio::test]
-	async fn initializes_runtime_from_first_event() {
+	async fn initializes_runtime_from_non_ethereum_first_event() {
+		let chain_id = ChainId::new(8_453).expect("Base chain ID should be valid");
 		let block = BlockEvent::new(
-			ChainId::ETHEREUM,
+			chain_id,
 			21_000_000,
 			"0x1111111111111111111111111111111111111111111111111111111111111111",
 			"0x2222222222222222222222222222222222222222222222222222222222222222",
@@ -211,7 +212,7 @@ mod tests {
 		let session = runtime.as_mut().expect("runtime should be initialized");
 
 		assert!(session.runtime.is_started());
-		assert_eq!(session.runtime.chain_id(), ChainId::ETHEREUM);
+		assert_eq!(session.runtime.chain_id(), chain_id);
 		assert_eq!(session.runtime.plugin_count(), 1);
 
 		shutdown_runtime(runtime).await.expect("runtime should shut down");

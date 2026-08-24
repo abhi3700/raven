@@ -1,7 +1,10 @@
 use crate::CoreError;
 use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
 
-/// EIP-155 chain identifier.
+/// Source-independent EIP-155 chain identifier.
+///
+/// Raven accepts every non-zero value representable by `u64`; named constants
+/// are conveniences, not a list of supported chains.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(transparent)]
 pub struct ChainId(u64);
@@ -56,10 +59,16 @@ mod tests {
 
 	#[test]
 	fn creates_valid_chain_id() {
-		let chain_id = ChainId::new(1).expect("chain ID should be valid");
+		let chain_id = ChainId::new(8_453).expect("chain ID should be valid");
 
-		assert_eq!(chain_id.get(), 1);
-		assert_eq!(chain_id, ChainId::ETHEREUM);
+		assert_eq!(chain_id.get(), 8_453);
+	}
+
+	#[test]
+	fn accepts_arbitrary_non_zero_eip155_chain_ids() {
+		for value in [1, 10, 56, 137, 8_453, 42_161, u64::MAX] {
+			assert_eq!(ChainId::new(value).unwrap().get(), value);
+		}
 	}
 
 	#[test]

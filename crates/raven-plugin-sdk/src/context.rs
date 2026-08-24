@@ -36,8 +36,9 @@ mod tests {
 
 	#[test]
 	fn creates_plugin_context() {
-		let context = PluginContext::new(ChainId::ETHEREUM);
+		let chain_id = ChainId::new(8_453).expect("test chain ID should be valid");
+		let context = PluginContext::new(chain_id);
 
-		assert_eq!(context.chain_id(), ChainId::ETHEREUM);
+		assert_eq!(context.chain_id(), chain_id);
 	}
 }

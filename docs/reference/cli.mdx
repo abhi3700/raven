@@ -28,7 +28,7 @@ raven run [--rpc-url <URL>] [OPTIONS]
 
 | Option                              | Environment    | Default      | Description                                                   |
 | ----------------------------------- | -------------- | ------------ | ------------------------------------------------------------- |
-| `--rpc-url <URL>`                   | `NODE_RPC_URL` | Saved config | Ethereum-compatible HTTP(S) or WS(S) JSON-RPC endpoint        |
+| `--rpc-url <URL>`                   | `NODE_RPC_URL` | Saved config | EVM-compatible HTTP(S) or WS(S) JSON-RPC endpoint             |
 | `--source <SOURCE>`                 | —              | `alloy`      | Event source; currently only `alloy`                          |
 | `--poll-interval-ms <MS>`           | —              | `4000`       | HTTP(S) block-number poll interval; must be greater than zero |
 | `--reconciliation-interval-ms <MS>` | —              | `30000`      | WS(S) safety reconciliation; must be greater than zero        |
@@ -42,10 +42,11 @@ raven run \
   --poll-interval-ms 1000
 ```
 
-The endpoint may use `http://`, `https://`, `ws://`, or `wss://`. HTTP(S) uses
-the polling interval. WS(S) uses `eth_subscribe("newHeads")` as its primary
-trigger and the reconciliation interval as a safety check. Both feed the same
-ordered full-block catch-up path.
+The endpoint may represent any EVM chain and use `http://`, `https://`, `ws://`,
+or `wss://`. Raven discovers its chain ID with `eth_chainId`; there is no
+hard-coded allowlist. HTTP(S) uses the polling interval. WS(S) uses
+`eth_subscribe("newHeads")` as its primary trigger and the reconciliation
+interval as a safety check. Both feed the same ordered full-block catch-up path.
 
 The RPC URL is resolved before Raven starts:
 
@@ -126,7 +127,7 @@ connectivity, storage, or plugin loading.
 Validate and persist an RPC endpoint:
 
 ```bash
-raven config set --rpc-url wss://eth.drpc.org
+raven config set --rpc-url wss://your-evm-rpc.example
 ```
 
 The command accepts `http`, `https`, `ws`, and `wss` URLs. It writes through a
@@ -144,7 +145,7 @@ raven config get
 Example output:
 
 ```yaml
-rpc_url: https://ethereum-rpc.publicnode.com
+rpc_url: https://your-evm-rpc.example
 config_file: /Users/example/Library/Application Support/raven/config.json
 ```
 

@@ -38,7 +38,8 @@ the runtime owns lifecycle and dispatch, and plugins own application logic.
 - Independent plugin workers with bounded FIFO mailboxes
 - Non-blocking fan-out, immediate delivery receipts, and live per-plugin outcomes
 - Error isolation and panic quarantine without blocking sibling plugins
-- Runtime state and chain-ID validation
+- Automatic EIP-155 chain discovery with no chain allowlist
+- Runtime state and per-chain validation
 - Transport-aware Alloy ingestion: HTTP polling or WS subscriptions with reconciliation
 - Persistent RPC URL configuration with CLI and environment overrides
 - Working CLI orchestration with graceful Ctrl+C shutdown
@@ -53,7 +54,7 @@ the runtime owns lifecycle and dispatch, and plugins own application logic.
 
 - Rust 1.91 or newer
 - Cargo
-- An Ethereum-compatible HTTP(S) or WS(S) JSON-RPC endpoint
+- An EVM-compatible HTTP(S) or WS(S) JSON-RPC endpoint
 
 ### Build and test
 
@@ -72,7 +73,7 @@ Pass an endpoint directly:
 ```bash
 cargo run -p raven -- run \
   --source alloy \
-  --rpc-url https://ethereum-rpc.publicnode.com
+  --rpc-url https://your-evm-rpc.example
 ```
 
 Persist the endpoint once and then run without repeating it:
@@ -94,17 +95,22 @@ WebSocket endpoints work through persisted config, the option, or the
 environment variable:
 
 ```bash
-raven run --rpc-url wss://eth.drpc.org
+raven run --rpc-url wss://your-evm-rpc.example
 ```
 
 Resolution order is `--rpc-url`, then `NODE_RPC_URL`, then persisted config.
 Run `raven config clear` to remove the persisted value.
 
-Raven discovers the endpoint's chain ID, fetches full blocks, sends normalized
-events through the runtime, and logs each block with the built-in
-`block-logger` plugin. HTTP(S) polls for new heights; WS(S) subscribes to
-`newHeads` and periodically reconciles missed heights. Press Ctrl+C to shut
-down cleanly.
+Raven calls `eth_chainId`, accepts any non-zero EIP-155 chain ID, and initializes
+the runtime from the first event. There is no Ethereum-mainnet allowlist. It
+then fetches full blocks, sends normalized events through the runtime, and logs
+each block with the built-in `block-logger` plugin. HTTP(S) polls for new
+heights; WS(S) subscribes to `newHeads` and periodically reconciles missed
+heights. Press Ctrl+C to shut down cleanly.
+
+One Raven process handles one discovered chain so event ordering and plugin
+state cannot accidentally cross chains. Run separate Raven processes to ingest
+multiple EVM chains concurrently.
 
 Tune the polling interval when needed:
 
@@ -118,7 +124,7 @@ For WS(S), tune the lower-frequency safety reconciliation independently:
 
 ```bash
 raven run \
-  --rpc-url wss://eth.drpc.org \
+  --rpc-url wss://your-evm-rpc.example \
   --reconciliation-interval-ms 30000
 ```
 

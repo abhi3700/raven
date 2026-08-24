@@ -391,13 +391,21 @@ mod tests {
 		}
 	}
 
-	fn ethereum_event() -> ChainEvent {
+	fn test_chain_id() -> ChainId {
+		ChainId::new(8_453).expect("test chain ID should be valid")
+	}
+
+	fn test_event() -> ChainEvent {
 		event_at(21_000_000)
 	}
 
 	fn event_at(block_number: u64) -> ChainEvent {
+		event_for_chain(test_chain_id(), block_number)
+	}
+
+	fn event_for_chain(chain_id: ChainId, block_number: u64) -> ChainEvent {
 		let block = BlockEvent::new(
-			ChainId::ETHEREUM,
+			chain_id,
 			block_number,
 			format!("0x{block_number:064x}"),
 			format!("0x{:064x}", block_number.saturating_sub(1)),
@@ -447,7 +455,7 @@ mod tests {
 		let events = Arc::new(AtomicUsize::new(0));
 		let shutdowns = Arc::new(AtomicUsize::new(0));
 
-		let mut runtime = Runtime::new(ChainId::ETHEREUM);
+		let mut runtime = Runtime::new(test_chain_id());
 
 		runtime
 			.register_plugin(LifecyclePlugin {
@@ -459,7 +467,7 @@ mod tests {
 
 		runtime.start().await.expect("runtime should start");
 
-		runtime.process(ethereum_event()).await.expect("runtime should process event");
+		runtime.process(test_event()).await.expect("runtime should process event");
 
 		runtime.shutdown().await.expect("runtime should shut down");
 
@@ -471,7 +479,7 @@ mod tests {
 	#[tokio::test]
 	async fn starts_plugins_concurrently() {
 		let barrier = Arc::new(Barrier::new(2));
-		let mut runtime = Runtime::new(ChainId::ETHEREUM);
+		let mut runtime = Runtime::new(test_chain_id());
 
 		for name in ["startup-a", "startup-b"] {
 			runtime
@@ -490,7 +498,7 @@ mod tests {
 	#[tokio::test]
 	async fn shuts_plugins_down_concurrently() {
 		let barrier = Arc::new(Barrier::new(2));
-		let mut runtime = Runtime::new(ChainId::ETHEREUM);
+		let mut runtime = Runtime::new(test_chain_id());
 
 		for name in ["shutdown-a", "shutdown-b"] {
 			runtime
@@ -510,7 +518,7 @@ mod tests {
 	async fn fast_plugin_finishes_without_waiting_for_slow_plugin() {
 		let entered = Arc::new(Notify::new());
 		let release = Arc::new(Notify::new());
-		let mut runtime = Runtime::new(ChainId::ETHEREUM);
+		let mut runtime = Runtime::new(test_chain_id());
 		let mut outcomes = runtime.subscribe_outcomes();
 
 		runtime
@@ -526,7 +534,7 @@ mod tests {
 			.expect("fast plugin should be registered");
 		runtime.start().await.expect("runtime should start");
 
-		let receipt = timeout(TEST_TIMEOUT, runtime.process(ethereum_event()))
+		let receipt = timeout(TEST_TIMEOUT, runtime.process(test_event()))
 			.await
 			.expect("dispatch should not await plugin handlers")
 			.expect("dispatch should succeed");
@@ -551,7 +559,7 @@ mod tests {
 	async fn plugin_error_is_emitted_immediately_and_worker_continues() {
 		let entered = Arc::new(Notify::new());
 		let release = Arc::new(Notify::new());
-		let mut runtime = Runtime::new(ChainId::ETHEREUM);
+		let mut runtime = Runtime::new(test_chain_id());
 		let mut outcomes = runtime.subscribe_outcomes();
 
 		runtime.register_plugin(FailingPlugin).expect("failing plugin should register");
@@ -609,7 +617,7 @@ mod tests {
 	async fn full_mailbox_rejects_only_the_slow_plugin() {
 		let entered = Arc::new(Notify::new());
 		let release = Arc::new(Notify::new());
-		let mut runtime = Runtime::with_plugin_mailbox_capacity(ChainId::ETHEREUM, 1)
+		let mut runtime = Runtime::with_plugin_mailbox_capacity(test_chain_id(), 1)
 			.expect("positive capacity should be valid");
 		let mut outcomes = runtime.subscribe_outcomes();
 
@@ -653,7 +661,7 @@ mod tests {
 	async fn plugin_panic_quarantines_only_that_worker_and_accounts_for_queued_events() {
 		let entered = Arc::new(Notify::new());
 		let release = Arc::new(Notify::new());
-		let mut runtime = Runtime::with_plugin_mailbox_capacity(ChainId::ETHEREUM, 2)
+		let mut runtime = Runtime::with_plugin_mailbox_capacity(test_chain_id(), 2)
 			.expect("positive capacity should be valid");
 		let mut outcomes = runtime.subscribe_outcomes();
 
@@ -701,7 +709,7 @@ mod tests {
 	#[tokio::test]
 	async fn preserves_order_inside_each_plugin_and_drains_on_shutdown() {
 		let observed = Arc::new(Mutex::new(Vec::new()));
-		let mut runtime = Runtime::new(ChainId::ETHEREUM);
+		let mut runtime = Runtime::new(test_chain_id());
 
 		runtime
 			.register_plugin(OrderingPlugin { observed: Arc::clone(&observed) })
@@ -722,7 +730,7 @@ mod tests {
 
 	#[test]
 	fn rejects_zero_plugin_mailbox_capacity() {
-		let error = Runtime::with_plugin_mailbox_capacity(ChainId::ETHEREUM, 0)
+		let error = Runtime::with_plugin_mailbox_capacity(test_chain_id(), 0)
 			.expect_err("zero capacity should fail");
 
 		assert!(matches!(error, RuntimeError::InvalidPluginMailboxCapacity));
@@ -730,19 +738,38 @@ mod tests {
 
 	#[tokio::test]
 	async fn rejects_processing_before_start() {
-		let mut runtime = Runtime::new(ChainId::ETHEREUM);
+		let mut runtime = Runtime::new(test_chain_id());
 
 		let error = runtime
-			.process(ethereum_event())
+			.process(test_event())
 			.await
 			.expect_err("processing before start should fail");
 
 		assert!(matches!(error, RuntimeError::NotStarted));
 	}
 
+	#[tokio::test]
+	async fn rejects_events_from_a_different_evm_chain() {
+		let mut runtime = Runtime::new(test_chain_id());
+		runtime
+			.register_plugin(SuccessPlugin { name: "chain-bound" })
+			.expect("plugin should register");
+		runtime.start().await.expect("runtime should start");
+
+		let other_chain_id = ChainId::new(42_161).expect("Arbitrum chain ID should be valid");
+		let error = runtime
+			.process(event_for_chain(other_chain_id, 21_000_000))
+			.await
+			.expect_err("a runtime must not mix events from different chains");
+
+		assert!(matches!(error, RuntimeError::ChainIdMismatch { expected: 8_453, actual: 42_161 }));
+
+		runtime.shutdown().await.expect("runtime should shut down");
+	}
+
 	#[test]
 	fn rejects_duplicate_plugins() {
-		let mut runtime = Runtime::new(ChainId::ETHEREUM);
+		let mut runtime = Runtime::new(test_chain_id());
 
 		let first = LifecyclePlugin {
 			starts: Arc::new(AtomicUsize::new(0)),

@@ -27,10 +27,15 @@ stateDiagram-v2
 Register plugins before calling `Runtime::start`:
 
 ```rust
-let mut runtime = Runtime::new(ChainId::ETHEREUM);
+let chain_id = ChainId::new(8_453)?;
+let mut runtime = Runtime::new(chain_id);
 runtime.register_plugin(MyPlugin)?;
 runtime.start().await?;
 ```
+
+The CLI supplies the chain ID discovered from the configured EVM endpoint. The
+runtime does not require Ethereum mainnet; it only requires that all events in
+one runtime match the same detected chain.
 
 Names returned by `Plugin::metadata` must be unique inside a runtime.
 Registration after startup returns `RuntimeError::RegistrationAfterStart`.

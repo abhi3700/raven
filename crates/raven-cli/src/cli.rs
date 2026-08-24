@@ -41,7 +41,7 @@ pub(crate) struct RunArgs {
 	#[arg(long, value_enum, default_value_t = EventSource::Alloy)]
 	pub(crate) source: EventSource,
 
-	/// Ethereum-compatible HTTP(S) or WS(S) JSON-RPC endpoint.
+	/// EVM-compatible HTTP(S) or WS(S) JSON-RPC endpoint.
 	#[arg(long, env = "NODE_RPC_URL")]
 	pub(crate) rpc_url: Option<String>,
 
@@ -57,7 +57,7 @@ pub(crate) struct RunArgs {
 /// Event sources supported by the CLI.
 #[derive(Debug, Clone, Copy, Default, ValueEnum)]
 pub(crate) enum EventSource {
-	/// Ingest an Ethereum JSON-RPC endpoint through Alloy.
+	/// Ingest an EVM JSON-RPC endpoint through Alloy.
 	#[default]
 	Alloy,
 }
@@ -67,7 +67,7 @@ pub(crate) enum EventSource {
 pub(crate) enum ConfigCommand {
 	/// Save the RPC URL used by `raven run` when no override is provided.
 	Set {
-		/// Ethereum-compatible HTTP(S) or WS(S) JSON-RPC endpoint.
+		/// EVM-compatible HTTP(S) or WS(S) JSON-RPC endpoint.
 		#[arg(long)]
 		rpc_url: String,
 	},

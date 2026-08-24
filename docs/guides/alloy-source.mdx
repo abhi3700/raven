@@ -3,7 +3,7 @@ title: "Alloy event source"
 description: "How Raven combines HTTP polling or WebSocket subscriptions with ordered block reconciliation."
 ---
 
-`AlloySource` is Raven's current chain adapter. It connects to Ethereum-compatible
+`AlloySource` is Raven's current chain adapter. It connects to EVM-compatible
 HTTP(S) and WS(S) JSON-RPC endpoints, fetches full blocks, converts them into
 normalized `ChainEvent` values, and publishes them through a bounded Tokio
 channel.
@@ -31,7 +31,7 @@ choice. A WebSocket is persistent and supports `eth_subscribe`, so Raven uses
 `newHeads` for low-latency signals rather than polling every few seconds as its
 primary mechanism.
 
-Raven deliberately does not use a subscription alone. Ethereum subscriptions
+Raven deliberately does not use a subscription alone. JSON-RPC subscriptions
 deliver current events rather than history, are tied to a live connection, and
 may omit intermediate notifications when several blocks arrive close together.
 A slower `eth_blockNumber` reconciliation therefore provides a correctness
@@ -42,6 +42,25 @@ See Alloy's
 and Geth's
 [subscription considerations](https://geth.ethereum.org/docs/interacting-with-geth/rpc/pubsub)
 for the underlying transport behavior.
+
+## Chain discovery
+
+The endpoint, not a compile-time constant, selects the chain:
+
+```mermaid
+flowchart LR
+    rpc[EVM RPC endpoint] --> chainId[eth_chainId]
+    chainId --> validate[Validate non-zero EIP-155 ID]
+    validate --> event[Tag every ChainEvent]
+    event --> first[First event initializes Runtime]
+    first --> context[PluginContext carries detected ID]
+```
+
+`ChainId` accepts every non-zero `u64`; Raven does not compare the discovered
+value against a supported-chain list. Alloy's default Ethereum network type is
+the baseline RPC block schema used by EVM chains—it does not force chain ID 1.
+An endpoint must provide the standard `eth_chainId`, `eth_blockNumber`, and
+`eth_getBlockByNumber` methods, plus `eth_subscribe` when using WS(S).
 
 ## One ordered catch-up path
 
@@ -116,7 +135,7 @@ use std::time::Duration;
 
 use raven_source_alloy::AlloySource;
 
-let source = AlloySource::new("wss://ethereum.example")
+let source = AlloySource::new("wss://your-evm-rpc.example")
     .with_reconciliation_interval(Duration::from_secs(30));
 ```
 

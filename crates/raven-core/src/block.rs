@@ -139,10 +139,14 @@ mod tests {
 
 	const PARENT_HASH: &str = "0x2222222222222222222222222222222222222222222222222222222222222222";
 
+	fn test_chain_id() -> ChainId {
+		ChainId::new(8_453).expect("test chain ID should be valid")
+	}
+
 	#[test]
 	fn creates_valid_block_event() {
 		let block = BlockEvent::new(
-			ChainId::ETHEREUM,
+			test_chain_id(),
 			21_000_000,
 			BLOCK_HASH,
 			PARENT_HASH,
@@ -151,7 +155,7 @@ mod tests {
 		)
 		.expect("block should be valid");
 
-		assert_eq!(block.chain_id(), ChainId::ETHEREUM);
+		assert_eq!(block.chain_id(), test_chain_id());
 		assert_eq!(block.block_number(), 21_000_000);
 		assert_eq!(block.block_hash(), BLOCK_HASH);
 		assert_eq!(block.parent_hash(), PARENT_HASH);
@@ -161,15 +165,9 @@ mod tests {
 
 	#[test]
 	fn rejects_invalid_block_hash() {
-		let error = BlockEvent::new(
-			ChainId::ETHEREUM,
-			21_000_000,
-			"0x1234",
-			PARENT_HASH,
-			1_720_000_000,
-			150,
-		)
-		.expect_err("invalid block hash should fail");
+		let error =
+			BlockEvent::new(test_chain_id(), 21_000_000, "0x1234", PARENT_HASH, 1_720_000_000, 150)
+				.expect_err("invalid block hash should fail");
 
 		assert_eq!(error, CoreError::InvalidBlockHash { field: "block_hash" });
 	}
@@ -177,7 +175,7 @@ mod tests {
 	#[test]
 	fn rejects_identical_hashes_for_non_genesis_block() {
 		let error = BlockEvent::new(
-			ChainId::ETHEREUM,
+			test_chain_id(),
 			21_000_000,
 			BLOCK_HASH,
 			BLOCK_HASH,
@@ -193,7 +191,7 @@ mod tests {
 	fn rejects_invalid_block_during_deserialization() {
 		let json = format!(
 			r#"{{
-				"chain_id": 1,
+				"chain_id": 8453,
 				"block_number": 21000000,
 				"block_hash": "0x1234",
 				"parent_hash": "{PARENT_HASH}",

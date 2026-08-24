@@ -5,7 +5,7 @@ description: "Connect Raven to an EVM JSON-RPC endpoint and process live block e
 
 ## 1. Choose an RPC endpoint
 
-Raven supports Ethereum-compatible HTTP(S) and WebSocket (WS/WSS) JSON-RPC
+Raven supports EVM-compatible HTTP(S) and WebSocket (WS/WSS) JSON-RPC
 endpoints through Alloy. You may use a local node or a hosted provider.
 
 Persist the endpoint once:
@@ -41,13 +41,13 @@ You can pass the endpoint directly instead:
 ```bash
 raven run \
   --source alloy \
-  --rpc-url https://ethereum-rpc.publicnode.com
+  --rpc-url https://your-evm-rpc.example
 ```
 
 For a WebSocket endpoint:
 
 ```bash
-raven run --rpc-url wss://eth.drpc.org
+raven run --rpc-url wss://your-evm-rpc.example
 ```
 
 Remove the persisted value when it is no longer needed:
@@ -56,11 +56,20 @@ Remove the persisted value when it is no longer needed:
 raven config clear
 ```
 
-Raven discovers the remote chain ID, fetches full blocks, and passes normalized
-events through the runtime. HTTP(S) endpoints use block-number polling. WS(S)
-endpoints use `newHeads` subscriptions for immediate notification plus a slower
-safety reconciliation. The CLI's built-in `block-logger` plugin logs each
-processed block.
+Raven calls `eth_chainId` and accepts any non-zero EIP-155 chain ID. The first
+event initializes the runtime and every plugin receives the detected chain ID
+through `PluginContext`; no Ethereum-mainnet value is hard-coded. Raven then
+fetches full blocks and passes normalized events through the runtime. HTTP(S)
+endpoints use block-number polling. WS(S) endpoints use `newHeads`
+subscriptions for immediate notification plus a slower safety reconciliation.
+The CLI's built-in `block-logger` plugin logs each processed block.
+
+<Note>
+    Chain agnostic means one Raven process can bind to any EVM chain. A running
+    `Runtime` intentionally accepts one chain ID only, preventing events and
+    mutable plugin state from different chains from being mixed. Run one Raven
+    process per endpoint when monitoring multiple chains.
+</Note>
 
 ## 3. Stop cleanly
 
@@ -85,7 +94,7 @@ and reconcile the latest height every 30,000 milliseconds by default:
 
 ```bash
 raven run \
-  --rpc-url wss://eth.drpc.org \
+  --rpc-url wss://your-evm-rpc.example \
   --reconciliation-interval-ms 60000
 ```
 

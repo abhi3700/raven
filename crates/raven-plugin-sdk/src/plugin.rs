@@ -69,7 +69,7 @@ mod tests {
 
 	fn block_event() -> BlockEvent {
 		BlockEvent::new(
-			ChainId::ETHEREUM,
+			ChainId::new(8_453).expect("test chain ID should be valid"),
 			21_000_000,
 			"0x1111111111111111111111111111111111111111111111111111111111111111",
 			"0x2222222222222222222222222222222222222222222222222222222222222222",
@@ -81,7 +81,8 @@ mod tests {
 
 	#[tokio::test]
 	async fn runs_plugin_lifecycle() {
-		let context = PluginContext::new(ChainId::ETHEREUM);
+		let context =
+			PluginContext::new(ChainId::new(8_453).expect("test chain ID should be valid"));
 		let event = ChainEvent::BlockApplied(block_event());
 		let mut plugin = TestPlugin::new();
 
