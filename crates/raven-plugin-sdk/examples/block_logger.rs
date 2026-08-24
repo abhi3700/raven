@@ -69,13 +69,13 @@ impl Plugin for BlockLoggerPlugin {
 	async fn handle_event(&mut self, event: &ChainEvent, _context: &PluginContext) -> PluginResult {
 		let block = event.block();
 
-		println!("\n📦 Block #{}", block.block_number);
+		println!("\n📦 Block #{}", block.block_number());
 
-		println!("Chain ID          : {}", u64::from(block.chain_id));
-		println!("Timestamp         : {}", block.timestamp);
-		println!("Transactions      : {}", block.transaction_count);
-		println!("Block Hash        : {}", block.block_hash);
-		println!("Parent Hash       : {}", block.parent_hash);
+		println!("Chain ID          : {}", u64::from(block.chain_id()));
+		println!("Timestamp         : {}", block.timestamp());
+		println!("Transactions      : {}", block.transaction_count());
+		println!("Block Hash        : {}", block.block_hash());
+		println!("Parent Hash       : {}", block.parent_hash());
 		println!("Applied           : {}", event.is_applied());
 
 		Ok(())

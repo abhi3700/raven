@@ -102,6 +102,8 @@ impl AlloySource {
 	}
 
 	/// Overrides the interval used to poll for new blocks.
+	///
+	/// A zero duration is rejected by [`Self::run`].
 	#[must_use]
 	pub const fn with_poll_interval(mut self, poll_interval: Duration) -> Self {
 		self.poll_interval = poll_interval;
@@ -112,10 +114,14 @@ impl AlloySource {
 	///
 	/// This method continues running until:
 	///
-	/// - the RPC block stream fails;
+	/// - an RPC request fails;
 	/// - event conversion fails; or
 	/// - the receiving side of the channel is dropped.
 	pub async fn run(self, sender: mpsc::Sender<ChainEvent>) -> AlloySourceResult {
+		if self.poll_interval.is_zero() {
+			return Err(AlloySourceError::InvalidPollInterval);
+		}
+
 		info!(
 			rpc_url = %self.rpc_url,
 			"connecting Alloy event source"
@@ -139,7 +145,7 @@ impl AlloySource {
 		let mut next_block_number = provider
 			.get_block_number()
 			.await
-			.map_err(|error| AlloySourceError::BlockStream(error.to_string()))?;
+			.map_err(|error| AlloySourceError::BlockRequest(error.to_string()))?;
 
 		let mut interval = tokio::time::interval(self.poll_interval);
 
@@ -151,15 +157,15 @@ impl AlloySource {
 			let latest_block_number = provider
 				.get_block_number()
 				.await
-				.map_err(|error| AlloySourceError::BlockStream(error.to_string()))?;
+				.map_err(|error| AlloySourceError::BlockRequest(error.to_string()))?;
 
 			while next_block_number <= latest_block_number {
 				let block = provider
 					.get_block_by_number(BlockNumberOrTag::Number(next_block_number))
 					.await
-					.map_err(|error| AlloySourceError::BlockStream(error.to_string()))?
+					.map_err(|error| AlloySourceError::BlockRequest(error.to_string()))?
 					.ok_or_else(|| {
-						AlloySourceError::BlockStream(format!(
+						AlloySourceError::BlockRequest(format!(
 							"block {next_block_number} was not returned by RPC"
 						))
 					})?;
@@ -169,8 +175,8 @@ impl AlloySource {
 				debug!(
 					chain_id = event.chain_id().get(),
 					block_number = event.block_number(),
-					block_hash = %event.block().block_hash,
-					transactions = event.block().transaction_count,
+					block_hash = %event.block().block_hash(),
+					transactions = event.block().transaction_count(),
 					"received block event"
 				);
 
@@ -179,5 +185,20 @@ impl AlloySource {
 				next_block_number += 1;
 			}
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[tokio::test]
+	async fn rejects_zero_poll_interval_before_connecting() {
+		let (sender, _receiver) = mpsc::channel(1);
+		let source = AlloySource::new("not-a-valid-rpc-url").with_poll_interval(Duration::ZERO);
+
+		let error = source.run(sender).await.expect_err("a zero polling interval must be rejected");
+
+		assert!(matches!(error, AlloySourceError::InvalidPollInterval));
 	}
 }

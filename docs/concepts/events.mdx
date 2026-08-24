@@ -25,10 +25,12 @@ assert_eq!(ethereum, ChainId::ETHEREUM);
 | `block_hash` | `String` | 32-byte, `0x`-prefixed hexadecimal hash |
 | `parent_hash` | `String` | Parent hash in the same format |
 | `timestamp` | `u64` | Unix timestamp in seconds |
-| `transaction_count` | `usize` | Transactions in the block |
+| `transaction_count` | `u64` | Transactions in the block |
 
 `BlockEvent::new` validates both hashes. For a non-genesis block, the block and
-parent hashes must differ.
+parent hashes must differ. Fields are private and exposed through accessors such
+as `block_hash()` and `transaction_count()`, so construction cannot bypass
+validation.
 
 ## Chain event
 
@@ -61,10 +63,28 @@ The model supports reverted blocks, but the Alloy source currently emits only
 `BlockApplied`. Reorg detection is on the roadmap.
 </Note>
 
+## Event boundary
+
+```mermaid
+flowchart LR
+    native[Source-native block] -->|adapter conversion| block[Validated BlockEvent]
+    block --> applied[ChainEvent BlockApplied]
+    block -. reorg support planned .-> reverted[ChainEvent BlockReverted]
+    applied --> runtime[Raven Runtime]
+    reverted -. planned source output .-> runtime
+```
+
+Transactions, logs, transfers, swaps, and other domain events are possible
+extensions, but they are not current `ChainEvent` variants. Runtime shutdown is
+a plugin lifecycle action and should remain outside the serializable chain-event
+model.
+
 ## Serialization
 
-Core event types derive Serde serialization. `ChainEvent` uses an internally
-tagged shape with snake-case variant names:
+Core event types support Serde serialization and validated deserialization.
+Deserializing a zero chain ID, malformed hash, or identical non-genesis block
+and parent hash returns an error. `ChainEvent` uses an internally tagged shape
+with snake-case variant names:
 
 ```json
 {

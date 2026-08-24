@@ -1,13 +1,16 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use eyre::Result;
 use raven_core::ChainEvent;
 use raven_plugin_sdk::{Plugin, PluginContext, PluginMetadata, PluginResult};
-use raven_runtime::Runtime;
+use raven_runtime::{PluginOutcome, PluginOutcomeStatus, Runtime};
 use raven_source_alloy::AlloySource;
-use tokio::{sync::mpsc, task::JoinHandle};
-use tracing::info;
+use tokio::{
+	sync::{broadcast, mpsc},
+	task::JoinHandle,
+};
+use tracing::{debug, error, info, warn};
 
 use crate::cli::{EventSource, RunArgs};
 
@@ -50,7 +53,7 @@ pub(crate) async fn run(args: RunArgs) -> Result<()> {
 	}
 
 	let source_result = await_source(source_task).await;
-	let shutdown_result = shutdown_runtime(runtime.as_mut()).await;
+	let shutdown_result = shutdown_runtime(runtime).await;
 
 	// Cleanup always runs before the first operational error is returned.
 	event_loop_result?;
@@ -70,31 +73,100 @@ fn spawn_source(args: &RunArgs, event_sender: mpsc::Sender<ChainEvent>) -> JoinH
 	}
 }
 
-async fn process_event(runtime: &mut Option<Runtime>, event: ChainEvent) -> Result<()> {
+async fn process_event(runtime: &mut Option<RuntimeSession>, event: ChainEvent) -> Result<()> {
 	if runtime.is_none() {
 		let mut initialized_runtime = Runtime::new(event.chain_id());
 
 		initialized_runtime.register_plugin(BlockLoggerPlugin)?;
 		initialized_runtime.start().await?;
+		let outcome_task = spawn_outcome_logger(initialized_runtime.subscribe_outcomes());
 
-		*runtime = Some(initialized_runtime);
+		*runtime = Some(RuntimeSession { runtime: initialized_runtime, outcome_task });
 	}
 
-	runtime
+	let receipt = runtime
 		.as_mut()
 		.expect("runtime is initialized before event processing")
+		.runtime
 		.process(event)
 		.await?;
+
+	if !receipt.all_accepted() {
+		warn!(
+			dispatch_id = receipt.dispatch_id().get(),
+			accepted = receipt.accepted_count(),
+			rejected = receipt.rejected_count(),
+			"event was not accepted by every plugin"
+		);
+	}
 
 	Ok(())
 }
 
-async fn shutdown_runtime(runtime: Option<&mut Runtime>) -> Result<()> {
-	if let Some(runtime) = runtime {
-		runtime.shutdown().await?;
-	}
+async fn shutdown_runtime(runtime: Option<RuntimeSession>) -> Result<()> {
+	let Some(mut session) = runtime else {
+		return Ok(());
+	};
+
+	let shutdown_result = session.runtime.shutdown().await;
+	drop(session.runtime);
+
+	let outcome_task_result = session.outcome_task.await;
+
+	shutdown_result?;
+	outcome_task_result?;
 
 	Ok(())
+}
+
+fn spawn_outcome_logger(mut outcomes: broadcast::Receiver<Arc<PluginOutcome>>) -> JoinHandle<()> {
+	tokio::spawn(async move {
+		loop {
+			match outcomes.recv().await {
+				Ok(outcome) => log_plugin_outcome(&outcome),
+				Err(broadcast::error::RecvError::Lagged(skipped)) => {
+					warn!(skipped, "plugin outcome logger fell behind");
+				},
+				Err(broadcast::error::RecvError::Closed) => break,
+			}
+		}
+	})
+}
+
+fn log_plugin_outcome(outcome: &PluginOutcome) {
+	let dispatch_id = outcome.dispatch_id().get();
+	let plugin = outcome.plugin();
+	let block_number = outcome.event().block_number();
+	let elapsed_micros = outcome.elapsed().as_micros();
+
+	match outcome.status() {
+		PluginOutcomeStatus::Succeeded => {
+			debug!(dispatch_id, plugin, block_number, elapsed_micros, "plugin completed event");
+		},
+		PluginOutcomeStatus::Failed(error) => {
+			error!(
+				dispatch_id,
+				plugin,
+				block_number,
+				elapsed_micros,
+				error = %error,
+				"plugin failed to handle event; worker remains active"
+			);
+		},
+		PluginOutcomeStatus::Panicked(message) => {
+			error!(
+				dispatch_id,
+				plugin,
+				block_number,
+				elapsed_micros,
+				panic = %message,
+				"plugin panicked; worker was quarantined"
+			);
+		},
+		PluginOutcomeStatus::Rejected(reason) => {
+			warn!(dispatch_id, plugin, block_number, ?reason, "plugin did not accept event");
+		},
+	}
 }
 
 async fn await_source(source_task: JoinHandle<Result<()>>) -> Result<()> {
@@ -129,14 +201,19 @@ mod tests {
 			.await
 			.expect("event should initialize the runtime and be processed");
 
-		let runtime = runtime.as_mut().expect("runtime should be initialized");
+		let session = runtime.as_mut().expect("runtime should be initialized");
 
-		assert!(runtime.is_started());
-		assert_eq!(runtime.chain_id(), ChainId::ETHEREUM);
-		assert_eq!(runtime.plugin_count(), 1);
+		assert!(session.runtime.is_started());
+		assert_eq!(session.runtime.chain_id(), ChainId::ETHEREUM);
+		assert_eq!(session.runtime.plugin_count(), 1);
 
-		runtime.shutdown().await.expect("runtime should shut down");
+		shutdown_runtime(runtime).await.expect("runtime should shut down");
 	}
+}
+
+struct RuntimeSession {
+	runtime: Runtime,
+	outcome_task: JoinHandle<()>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -168,9 +245,9 @@ impl Plugin for BlockLoggerPlugin {
 		let block = event.block();
 
 		info!(
-			block_number = block.block_number,
-			block_hash = %block.block_hash,
-			transactions = block.transaction_count,
+			block_number = block.block_number(),
+			block_hash = %block.block_hash(),
+			transactions = block.transaction_count(),
 			applied = event.is_applied(),
 			"processed block"
 		);

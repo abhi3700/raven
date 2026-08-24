@@ -25,12 +25,12 @@ impl ChainEvent {
 
 	/// Returns the chain ID associated with the event.
 	pub const fn chain_id(&self) -> ChainId {
-		self.block().chain_id
+		self.block().chain_id()
 	}
 
 	/// Returns the block number associated with the event.
 	pub const fn block_number(&self) -> u64 {
-		self.block().block_number
+		self.block().block_number()
 	}
 
 	/// Returns whether a block was added to the canonical chain.
@@ -78,5 +78,14 @@ mod tests {
 		assert_eq!(event.block_number(), 21_000_000);
 		assert!(!event.is_applied());
 		assert!(event.is_reverted());
+	}
+
+	#[test]
+	fn round_trips_a_valid_event_through_json() {
+		let event = ChainEvent::BlockApplied(block_event());
+		let json = serde_json::to_string(&event).expect("event should serialize");
+		let decoded: ChainEvent = serde_json::from_str(&json).expect("event should deserialize");
+
+		assert_eq!(decoded, event);
 	}
 }

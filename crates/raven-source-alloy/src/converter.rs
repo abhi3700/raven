@@ -7,6 +7,9 @@ use raven_core::{BlockEvent, ChainEvent, ChainId};
 /// Converts an Alloy RPC block into Raven's normalized event model.
 pub(crate) fn convert_block(chain_id: ChainId, block: &Block) -> AlloySourceResult<ChainEvent> {
 	let header = block.header();
+	let transaction_count = u64::try_from(block.transactions().len()).map_err(|error| {
+		AlloySourceError::BlockConversion(format!("transaction count does not fit in u64: {error}"))
+	})?;
 
 	let normalized_block = BlockEvent::new(
 		chain_id,
@@ -14,7 +17,7 @@ pub(crate) fn convert_block(chain_id: ChainId, block: &Block) -> AlloySourceResu
 		header.hash.to_string(),
 		header.parent_hash().to_string(),
 		header.timestamp(),
-		block.transactions().len(),
+		transaction_count,
 	)
 	.map_err(|error| AlloySourceError::BlockConversion(error.to_string()))?;
 
@@ -51,7 +54,7 @@ mod tests {
 		assert!(event.is_applied());
 		assert_eq!(event.chain_id(), ChainId::ETHEREUM);
 		assert_eq!(event.block_number(), 21_000_000);
-		assert_eq!(event.block().timestamp, 1_720_000_000);
-		assert_eq!(event.block().transaction_count, 0);
+		assert_eq!(event.block().timestamp(), 1_720_000_000);
+		assert_eq!(event.block().transaction_count(), 0);
 	}
 }

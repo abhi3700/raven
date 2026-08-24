@@ -74,7 +74,9 @@ impl Plugin for BlockLoggerPlugin {
 
 		println!(
 			"block=#{:<10} txs={:<4} hash={}",
-			block.block_number, block.transaction_count, block.block_hash,
+			block.block_number(),
+			block.transaction_count(),
+			block.block_hash(),
 		);
 
 		Ok(())

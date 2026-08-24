@@ -6,6 +6,9 @@ pub type AlloySourceResult<T = ()> = Result<T, AlloySourceError>;
 /// Errors produced while connecting to or reading from an Alloy provider.
 #[derive(Debug, Error)]
 pub enum AlloySourceError {
+	#[error("poll interval must be greater than zero")]
+	InvalidPollInterval,
+
 	#[error("failed to connect to RPC endpoint: {0}")]
 	Connection(String),
 
@@ -15,11 +18,8 @@ pub enum AlloySourceError {
 	#[error("RPC returned invalid chain ID {0}")]
 	InvalidChainId(u64),
 
-	#[error("failed to create block watcher: {0}")]
-	Watcher(String),
-
-	#[error("failed to retrieve watched block: {0}")]
-	BlockStream(String),
+	#[error("failed to retrieve block data: {0}")]
+	BlockRequest(String),
 
 	#[error("failed to normalize block: {0}")]
 	BlockConversion(String),

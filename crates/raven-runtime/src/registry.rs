@@ -41,9 +41,9 @@ impl PluginRegistry {
 		Ok(())
 	}
 
-	/// Returns mutable access to all registered plugins.
-	pub(crate) fn iter_mut(&mut self) -> impl Iterator<Item = &mut Box<dyn Plugin>> {
-		self.plugins.iter_mut()
+	/// Transfers all registered plugins to runtime workers.
+	pub(crate) fn take_plugins(&mut self) -> Vec<Box<dyn Plugin>> {
+		std::mem::take(&mut self.plugins)
 	}
 
 	/// Returns the number of registered plugins.

@@ -7,10 +7,11 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+futures-util.workspace = true
 raven-core = { path = "../raven-core" }
 raven-plugin-sdk = { path = "../raven-plugin-sdk" }
 thiserror.workspace = true
+tokio.workspace = true
 
 [dev-dependencies]
 async-trait.workspace = true
-tokio.workspace = true

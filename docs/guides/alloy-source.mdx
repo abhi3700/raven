@@ -9,26 +9,16 @@ Tokio channel.
 
 ## Polling flow
 
-```text
-eth_chainId
-    │
-    ▼
-validate ChainId
-    │
-    ▼
-eth_blockNumber
-    │
-    ▼
-poll eth_blockNumber every interval
-    │
-    ▼
-eth_getBlockByNumber for each missing height
-    │
-    ▼
-BlockEvent → ChainEvent::BlockApplied
-    │
-    ▼
-mpsc::Sender<ChainEvent>
+```mermaid
+flowchart TD
+    chainId[eth_chainId] --> validate[Validate ChainId]
+    validate --> latest[eth_blockNumber]
+    latest --> poll[Poll latest height]
+    poll --> fetch[Fetch every missing block in order]
+    fetch --> normalize[Build validated BlockEvent]
+    normalize --> event[ChainEvent BlockApplied]
+    event --> channel[Bounded event channel]
+    channel --> poll
 ```
 
 The source uses polling instead of filter APIs such as `eth_newBlockFilter`
@@ -64,6 +54,9 @@ while let Some(event) = receiver.recv().await {
     println!("received block {}", event.block_number());
 }
 ```
+
+`AlloySource::run` rejects a zero polling interval before connecting. The CLI
+also validates `--poll-interval-ms` as greater than zero.
 
 ## Failure behavior
 

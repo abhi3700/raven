@@ -19,20 +19,12 @@ Blockchain applications often rebuild the same RPC polling, block
 normalization, and event dispatch pipeline. Raven separates that infrastructure
 from application behavior:
 
-```text
-EVM chain
-   │
-   ▼
-Event source (Alloy today, Reth ExEx planned)
-   │
-   ▼
-Normalized ChainEvent
-   │
-   ▼
-Raven Runtime
-   │
-   ▼
-Plugins
+```mermaid
+flowchart LR
+    chain[EVM chain] --> source[Event source]
+    source --> event[Normalized ChainEvent]
+    event --> runtime[Raven Runtime]
+    runtime --> plugins[Plugins]
 ```
 
 The Alloy source owns JSON-RPC access, `raven-core` owns validated event types,
@@ -41,12 +33,15 @@ the runtime owns lifecycle and dispatch, and plugins own application logic.
 ## Current features
 
 - Event-driven, async Rust architecture
-- Validated, serializable core event model
+- Validation-preserving construction and deserialization for core events
 - Unique-name plugin registration and lifecycle hooks
+- Independent plugin workers with bounded FIFO mailboxes
+- Non-blocking fan-out, immediate delivery receipts, and live per-plugin outcomes
+- Error isolation and panic quarantine without blocking sibling plugins
 - Runtime state and chain-ID validation
 - Ordered block polling through Alloy
 - Working CLI orchestration with graceful Ctrl+C shutdown
-- Source abstraction designed for future Reth ExEx support
+- Normalized event boundary designed for future Reth ExEx support
 
 > **Important:** Raven is early-stage. Reorg detection, dynamic plugin
 > installation, persistent configuration, and Reth ExEx integration are planned
@@ -161,6 +156,9 @@ The complete Mintlify documentation starts at
 [docs/index.mdx](./docs/index.mdx). Its navigation and theme are configured in
 [docs.json](./docs.json).
 
+The [design principles](./docs/concepts/design-principles.mdx) reconcile the
+project vision with current architectural boundaries.
+
 Preview the site locally with Node.js 20.17 or newer:
 
 ```bash
@@ -184,17 +182,17 @@ mint validate
 
 ## Roadmap
 
-Near-term work includes:
+The next milestone focuses on correctness before expanding the plugin catalog:
 
-- Reorg-aware applied and reverted block events
+- Delivery semantics and durable checkpoint ownership
+- Lifecycle timeouts, worker health, restart supervision, and multi-error reporting
 - Retry and backoff for transient RPC failures
-- Historical starting-block configuration
-- ERC-20 transfer and DEX swap plugins
-- Plugin discovery and installation
-- Reth ExEx integration
+- Historical starting-block and resume configuration
+- Reorg-aware applied and reverted block events
+- A large ERC-20 transfer plugin as the first vertical slice
 
 See the [full roadmap](./docs/reference/roadmap.mdx) for implemented and planned
-capabilities.
+capabilities, exit criteria, and later Reth/plugin-platform work.
 
 ## License
 

@@ -1,6 +1,6 @@
 ---
 title: "Create a plugin"
-description: "description: "Implement and test a Raven plugin that processes chain events."
+description: "Implement and test a Raven plugin that processes chain events."
 ---
 
 A Raven plugin implements one required method, `handle_event`. Startup (i.e. `start`) and
@@ -68,6 +68,34 @@ runtime.register_plugin(BlockLogger)?;
 runtime.start().await?;
 ```
 
+## Observe dispatch and execution separately
+
+`Runtime::process` returns after attempting to enqueue the event for every
+plugin. Subscribe to outcomes before dispatch when the application needs each
+handler result:
+
+```rust
+let mut outcomes = runtime.subscribe_outcomes();
+let receipt = runtime.process(event).await?;
+
+if !receipt.all_accepted() {
+    eprintln!("{} plugin deliveries were rejected", receipt.rejected_count());
+}
+
+while let Ok(outcome) = outcomes.recv().await {
+    println!(
+        "dispatch {}: {} -> {:?}",
+        outcome.dispatch_id().get(),
+        outcome.plugin(),
+        outcome.status(),
+    );
+}
+```
+
+The receipt describes mailbox delivery. Each `PluginOutcome` describes later
+execution and arrives as soon as that plugin completes; it never waits for all
+plugins to form one aggregate response.
+
 ## Return useful errors
 
 Use the closest `PluginError` category so callers can diagnose failures:
@@ -92,7 +120,14 @@ cargo run -p raven-plugin-sdk --example block_logger
 
 - Keep metadata names stable and unique.
 - Match only the event variants the plugin understands.
-- Keep `handle_event` bounded; plugins are called sequentially.
+- Keep `handle_event` bounded. Events are sequential inside one plugin, while
+  different plugins run concurrently. Event `E2` will not start in your plugin
+  until its `E1` handler finishes, but another plugin may already be processing
+  or finishing `E2`.
+- Use async clients for I/O. Move blocking or CPU-heavy work to
+  `tokio::task::spawn_blocking` or a dedicated compute pool.
+- Expect bounded-mailbox overload and make stateful processing idempotent in
+  preparation for future replay semantics.
 - Return errors instead of panicking on chain data.
 - Allocate external clients in `start` and release resources in `shutdown`.
 - Unit-test the lifecycle with constructed `ChainEvent` values.

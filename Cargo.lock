@@ -3212,6 +3212,7 @@ name = "raven-core"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "serde_json",
  "thiserror",
 ]
 
@@ -3231,6 +3232,7 @@ name = "raven-runtime"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "futures-util",
  "raven-core",
  "raven-plugin-sdk",
  "thiserror",
@@ -3244,7 +3246,6 @@ dependencies = [
  "alloy",
  "async-trait",
  "eyre",
- "futures-util",
  "raven-core",
  "raven-plugin-sdk",
  "raven-runtime",

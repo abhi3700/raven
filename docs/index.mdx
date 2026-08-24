@@ -3,9 +3,9 @@ title: "Raven"
 description: "Build event-driven EVM applications with a source-independent runtime and reusable Rust plugins."
 ---
 
-Raven is a programmable event engine for EVM chains. It turns source-specific
-blockchain data into normalized events, then delivers those events to reusable
-plugins.
+Raven is a source-independent event runtime with a plugin system for EVM
+chains. It turns source-specific blockchain data into normalized events, then
+delivers those events to reusable plugins.
 
 <CardGroup cols={2}>
   <Card title="Run Raven" icon="rocket" href="/docs/getting-started/quickstart">
@@ -16,6 +16,9 @@ plugins.
   </Card>
   <Card title="Understand the architecture" icon="blocks" href="/docs/concepts/architecture">
     See how sources, the runtime, dispatcher, and plugins fit together.
+  </Card>
+  <Card title="Read the design principles" icon="landmark" href="/docs/concepts/design-principles">
+    Learn which responsibilities belong to sources, the runtime, and plugins.
   </Card>
   <Card title="Explore the crates" icon="package" href="/docs/reference/crates">
     Find the responsibility and stability boundary of every workspace crate.
@@ -28,20 +31,12 @@ Most blockchain applications repeatedly poll RPC endpoints and rebuild the same
 ingestion, normalization, and dispatch logic. Raven extracts that pipeline into
 shared infrastructure:
 
-```text
-EVM chain
-   │
-   ▼
-Event source (Alloy today, Reth ExEx planned)
-   │
-   ▼
-Normalized ChainEvent
-   │
-   ▼
-Raven Runtime
-   │
-   ▼
-Plugins
+```mermaid
+flowchart LR
+    chain[EVM chain] --> source[Event source]
+    source --> event[Normalized ChainEvent]
+    event --> runtime[Raven Runtime]
+    runtime --> plugins[Plugins]
 ```
 
 Source adapters own chain access. The core crate owns normalized types. The

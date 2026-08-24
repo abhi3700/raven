@@ -1,127 +1,48 @@
 # Raven Runtime
 
-This is the heart of Raven, while the CLI & event sources are just ways to interact with it.
+`raven-runtime` is Raven's orchestration boundary. It validates normalized
+events, owns plugin lifecycle, and fans each event out to independent plugin
+workers.
 
-Owns everything
-
-```rust
-pub struct Runtime {
-    dispatcher: Dispatcher,
-}
+```text
+Runtime::process(event)
+        |
+        v
+  non-blocking dispatcher
+     |          |
+     v          v
+ mailbox A   mailbox B       <- bounded FIFO queues
+     |          |
+     v          v
+ worker A    worker B        <- independent Tokio tasks
+     \          /
+      v        v
+    live PluginOutcome stream
 ```
 
-## Dispatcher
+Every worker exclusively owns its `Box<dyn Plugin>`. Events are sequential and
+ordered within one plugin, while different plugins execute concurrently.
 
-Receives
+## Two-stage results
 
-```rust
-ChainEvent
-```
+`Runtime::process` returns a `DispatchReceipt` immediately after `try_send` has
+been attempted for every plugin. Each delivery is either accepted or explicitly
+rejected because the mailbox is full or the worker stopped.
 
-and forwards it to every registered plugin.
+`Runtime::subscribe_outcomes` provides each plugin's later `Succeeded`,
+`Failed`, `Panicked`, or `Rejected` result as soon as it exists. A returned
+plugin error does not stop its worker or any sibling. A panic quarantines only
+the panicked worker.
 
-```sh
-ChainEvent
+## Lifecycle
 
-↓
+- Startup hooks run concurrently behind one readiness barrier.
+- Event handlers run concurrently across plugins and FIFO within each plugin.
+- Shutdown closes all mailboxes first, then workers concurrently drain accepted
+  events and run their cleanup hooks.
 
-Dispatcher
+The live broadcast outcome stream is not durable. Per-plugin timeouts, restart
+supervision, and persistent replay/dead-letter queues remain future work.
 
-↓
-
-Plugin A
-
-Plugin B
-
-Plugin C
-```
-
-## Registry
-
-Stores plugins.
-
-Initially something like
-
-```rust
-Vec<Box<dyn Plugin>>
-```
-
-Later you can support:
-
-- enable/disable
-- priorities
-- dependencies
-- plugin IDs
-
-without changing the dispatcher.
-
-## Error
-
-Runtime-specific errors only.
-
----
-
-## Conclusion
-
-Then Alloy becomes tiny.
-
-Once the runtime exists, Alloy only does one job.
-
-```sh
-watch_blocks()
-
-↓
-
-convert to ChainEvent
-
-↓
-
-runtime.dispatch(event)
-```
-
-That’s all.
-
----
-
-Similarly for Reth, it becomes:
-
-```sh
-ExEx Notification
-
-↓
-
-convert to ChainEvent
-
-↓
-
-runtime.dispatch(event)
-```
-
-No plugin changes.
-
-No runtime changes.
-
-No dispatcher changes.
-
----
-
-Final Architecture
-
-```sh
-              CLI
-               │
-               ▼
-            Runtime
-               │
-           Dispatcher
-               ▲
-               │
-        ChainEvent
-        ▲        ▲
-        │        │
-    Alloy      Reth
-```
-
-> Notice how `Alloy` and `Reth` are now just adapters.
-
-That’s exactly what we want.
+The full HLD and LLD are in
+[`docs/concepts/architecture.mdx`](../../docs/concepts/architecture.mdx).

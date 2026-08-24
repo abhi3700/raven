@@ -10,6 +10,9 @@ pub enum RuntimeError {
 	#[error("plugin '{name}' is already registered")]
 	DuplicatePlugin { name: String },
 
+	#[error("plugin mailbox capacity must be greater than zero")]
+	InvalidPluginMailboxCapacity,
+
 	#[error("plugins cannot be registered after the runtime has started")]
 	RegistrationAfterStart,
 
@@ -28,6 +31,12 @@ pub enum RuntimeError {
 	)]
 	ChainIdMismatch { expected: u64, actual: u64 },
 
+	#[error("dispatch ID space is exhausted")]
+	DispatchIdExhausted,
+
+	#[error("plugin worker '{plugin}' stopped during {operation}: {reason}")]
+	PluginWorkerStopped { plugin: String, operation: &'static str, reason: String },
+
 	#[error("plugin '{plugin}' failed during {operation}: {source}")]
 	PluginOperation {
 		plugin: String,
@@ -45,5 +54,13 @@ impl RuntimeError {
 		source: PluginError,
 	) -> Self {
 		Self::PluginOperation { plugin: plugin.into(), operation, source }
+	}
+
+	pub(crate) fn plugin_worker_stopped(
+		plugin: impl Into<String>,
+		operation: &'static str,
+		reason: impl Into<String>,
+	) -> Self {
+		Self::PluginWorkerStopped { plugin: plugin.into(), operation, reason: reason.into() }
 	}
 }

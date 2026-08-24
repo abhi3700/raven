@@ -35,6 +35,7 @@
         "group": "Core concepts",
         "pages": [
           "docs/concepts/architecture",
+          "docs/concepts/design-principles",
           "docs/concepts/events",
           "docs/concepts/plugin-lifecycle"
         ]

@@ -35,7 +35,7 @@ Public exports:
 - `PluginError`
 - `PluginResult`
 
-Use this crate when implementing an event processor.
+Use this crate when implementing a Raven plugin.
 
 ## `raven-runtime`
 
@@ -44,9 +44,20 @@ Public exports:
 - `Runtime`
 - `RuntimeError`
 - `RuntimeResult`
+- `DispatchId`
+- `DispatchReceipt`
+- `PluginDelivery`
+- `PluginDeliveryStatus`
+- `PluginDeliveryFailure`
+- `PluginOutcome`
+- `PluginOutcomeStatus`
+- `DEFAULT_PLUGIN_MAILBOX_CAPACITY`
+- `DEFAULT_OUTCOME_CHANNEL_CAPACITY`
 
 `Dispatcher` and `PluginRegistry` are internal implementation details. Use
 `Runtime::register_plugin` and lifecycle methods instead of depending on them.
+`Runtime::process` returns non-blocking per-plugin delivery information;
+`Runtime::subscribe_outcomes` exposes independently completed handler results.
 
 ## `raven-source-alloy`
 

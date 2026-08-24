@@ -2,7 +2,7 @@ use crate::{PluginContext, PluginMetadata, PluginResult};
 use async_trait::async_trait;
 use raven_core::ChainEvent;
 
-/// A reusable Raven blockchain event processor.
+/// A reusable Raven plugin that processes normalized blockchain events.
 #[async_trait]
 pub trait Plugin: Send + Sync {
 	/// Returns static information about the plugin.

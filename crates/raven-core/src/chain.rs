@@ -1,8 +1,8 @@
 use crate::CoreError;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
 
 /// EIP-155 chain identifier.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(transparent)]
 pub struct ChainId(u64);
 
@@ -39,6 +39,17 @@ impl From<ChainId> for u64 {
 	}
 }
 
+impl<'de> Deserialize<'de> for ChainId {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: Deserializer<'de>,
+	{
+		let value = u64::deserialize(deserializer)?;
+
+		Self::new(value).map_err(D::Error::custom)
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -56,5 +67,13 @@ mod tests {
 		let error = ChainId::new(0).expect_err("zero chain ID should fail");
 
 		assert_eq!(error, CoreError::InvalidChainId);
+	}
+
+	#[test]
+	fn rejects_zero_chain_id_during_deserialization() {
+		let error = serde_json::from_str::<ChainId>("0")
+			.expect_err("deserialization must preserve the chain ID invariant");
+
+		assert!(error.to_string().contains("chain ID must be greater than zero"));
 	}
 }
