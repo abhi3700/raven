@@ -17,7 +17,7 @@
 //! Run with:
 //!
 //! ```sh
-//! RAVEN_RPC_URL=https://ethereum-rpc.publicnode.com \
+//! NODE_RPC_URL=https://ethereum-rpc.publicnode.com \
 //! cargo run -p raven-source-alloy --example e2e
 //! ```
 //!
@@ -93,7 +93,10 @@ impl Plugin for BlockLoggerPlugin {
 async fn main() -> eyre::Result<()> {
 	init_tracing();
 
-	let rpc_url = env::var("RAVEN_RPC_URL").unwrap_or_else(|_| DEFAULT_RPC_URL.to_owned());
+	dotenvy::dotenv().ok();
+	dotenvy::from_path("./.env").expect("Failed to get the .env file");
+
+	let rpc_url = env::var("NODE_RPC_URL").unwrap_or_else(|_| DEFAULT_RPC_URL.to_owned());
 
 	/*
 	 * The current example assumes Ethereum mainnet because Runtime requires

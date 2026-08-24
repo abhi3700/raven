@@ -11,6 +11,13 @@ cargo run -p raven --
 
 After `cargo install --path crates/raven-cli`, invoke `raven` directly.
 
+## Command presentation
+
+Running `raven` without a command prints the Raven banner followed by the
+top-level help. `raven run` also prints the banner before starting the runtime.
+Management commands such as `plugins`, `doctor`, and `config` use compact output
+so their result is immediately visible and easy to use in scripts.
+
 ## `raven run`
 
 Start the event-processing loop.
@@ -19,11 +26,11 @@ Start the event-processing loop.
 raven run --rpc-url <URL> [OPTIONS]
 ```
 
-| Option | Environment | Default | Description |
-| --- | --- | --- | --- |
-| `--rpc-url <URL>` | `RAVEN_RPC_URL` | Required | Ethereum-compatible HTTP JSON-RPC endpoint |
-| `--source <SOURCE>` | — | `alloy` | Event source; currently only `alloy` |
-| `--poll-interval-ms <MS>` | — | `4000` | Block-number polling interval; must be greater than zero |
+| Option                    | Environment    | Default  | Description                                              |
+| ------------------------- | -------------- | -------- | -------------------------------------------------------- |
+| `--rpc-url <URL>`         | `NODE_RPC_URL` | Required | Ethereum-compatible HTTP(S) or WS(S) JSON-RPC endpoint   |
+| `--source <SOURCE>`       | —              | `alloy`  | Event source; currently only `alloy`                     |
+| `--poll-interval-ms <MS>` | —              | `4000`   | Block-number polling interval; must be greater than zero |
 
 Example:
 
@@ -34,23 +41,57 @@ raven run \
   --poll-interval-ms 1000
 ```
 
+The endpoint may use `http://`, `https://`, `ws://`, or `wss://`. Raven uses
+the same ordered polling and catch-up behavior over both HTTP and WebSocket.
+
 ## `raven plugins list`
 
-Report external plugins known to the CLI:
+Report built-in and external plugins known to the CLI:
 
 ```bash
 raven plugins list
 ```
 
-The current CLI does not have persistent plugin discovery, so this reports that
-no external plugins are installed. The built-in `block-logger` used by
-`raven run` is not an external plugin.
+Current output:
+
+```text
+Built-in plugins
+  block-logger  bundled with `raven run`
+
+External plugins
+  None installed (installation is planned)
+```
+
+The current CLI does not have persistent external-plugin discovery. The
+built-in `block-logger` used by `raven run` does not need to be installed.
 
 ## Planned plugin commands
 
-`raven plugins install <NAME>` and `raven plugins remove <NAME>` are present to
-reserve the command interface. They currently exit with an explicit
-“not implemented” error and do not modify the system.
+`raven plugins install <PLUGIN>` and `raven plugins remove <PLUGIN>` reserve the
+future external-plugin management interface. They currently exit unsuccessfully
+with a concise “not available yet” error and do not modify the system.
+
+For example, trying to install the built-in logger explains that it is already
+part of `raven run`:
+
+```console
+$ raven plugins install blocklogger
+Error: external plugin installation is not available yet
+  requested: blocklogger
+  note: `block-logger` is built into `raven run` and needs no installation
+```
+
+Other external plugin names report their current status:
+
+```console
+$ raven plugins install whale-detector
+Error: external plugin installation is not available yet
+  requested: whale-detector
+  status: planned
+```
+
+These errors intentionally omit Rust source locations and backtraces from
+normal CLI output.
 
 ## `raven doctor`
 
@@ -65,7 +106,7 @@ connectivity, storage, or plugin loading.
 
 ## `raven config`
 
-Print the effective `RAVEN_RPC_URL` environment value:
+Print the effective `NODE_RPC_URL` environment value:
 
 ```bash
 raven config

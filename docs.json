@@ -2,7 +2,7 @@
   "$schema": "https://mintlify.com/docs.json",
   "theme": "mint",
   "name": "Raven",
-  "description": "A programmable event engine for EVM chains.",
+  "description": "A programmable blockchain event runtime powered by plugins.",
   "colors": {
     "primary": "#168BFF",
     "light": "#42A5FF",

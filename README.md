@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <strong>A programmable event engine for EVM chains.</strong>
+  <strong>A programmable blockchain event runtime powered by plugins.</strong>
 </p>
 
 <p align="center">
@@ -53,7 +53,7 @@ the runtime owns lifecycle and dispatch, and plugins own application logic.
 
 - Rust 1.91 or newer
 - Cargo
-- An Ethereum-compatible HTTP JSON-RPC endpoint
+- An Ethereum-compatible HTTP(S) or WS(S) JSON-RPC endpoint
 
 ### Build and test
 
@@ -78,8 +78,14 @@ cargo run -p raven -- run \
 Or configure it through the environment:
 
 ```bash
-export RAVEN_RPC_URL="http://localhost:8545"
+export NODE_RPC_URL="http://localhost:8545"
 cargo run -p raven -- run
+```
+
+WebSocket endpoints work through the same option or environment variable:
+
+```bash
+raven run --rpc-url wss://eth.drpc.org
 ```
 
 Raven discovers the endpoint's chain ID, polls for blocks, sends normalized
@@ -143,7 +149,7 @@ raven/
 │   ├── raven-core/          # Validated normalized chain events
 │   ├── raven-plugin-sdk/    # Plugin contract and context
 │   ├── raven-runtime/       # Registry, lifecycle, and dispatcher
-│   └── raven-source-alloy/  # Alloy HTTP JSON-RPC source
+│   └── raven-source-alloy/  # Alloy HTTP/WebSocket JSON-RPC source
 ├── docs/                    # Mintlify MDX pages
 ├── docs.json                # Mintlify site configuration
 ├── res/                     # Brand assets

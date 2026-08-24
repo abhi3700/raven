@@ -21,12 +21,11 @@
 //! filter-based JSON-RPC APIs (e.g. `eth_newBlockFilter` and
 //! `eth_getFilterChanges`).
 //!
-//! While this works well with many node implementations, several public HTTP
-//! RPC providers either do not support these APIs or support them
-//! inconsistently.
+//! While this works well with many node implementations, several public RPC
+//! providers either do not support these APIs or support them inconsistently.
 //!
-//! To make Raven work reliably with **any standard HTTP RPC endpoint**, this
-//! source instead:
+//! To make Raven work reliably with standard HTTP(S) and WebSocket (WS/WSS)
+//! RPC endpoints, this source instead:
 //!
 //! 1. Polls the latest block number using `eth_blockNumber`.
 //! 2. Detects whether new blocks have been mined.
@@ -35,6 +34,10 @@
 //!
 //! This guarantees that if multiple blocks are mined between polling
 //! intervals, **every block is processed in order**.
+//!
+//! The URL scheme selects Alloy's transport. Both transports use this same
+//! polling and catch-up algorithm; WS/WSS support does not switch the source to
+//! `eth_subscribe`.
 //!
 //! ## Event Flow
 //!
@@ -200,5 +203,21 @@ mod tests {
 		let error = source.run(sender).await.expect_err("a zero polling interval must be rejected");
 
 		assert!(matches!(error, AlloySourceError::InvalidPollInterval));
+	}
+
+	#[test]
+	fn accepts_http_and_websocket_connection_strings() {
+		use alloy::rpc::client::BuiltInConnectionString;
+
+		for rpc_url in [
+			"http://localhost:8545",
+			"https://ethereum.example",
+			"ws://localhost:8546",
+			"wss://ethereum.example",
+		] {
+			rpc_url
+				.parse::<BuiltInConnectionString>()
+				.unwrap_or_else(|error| panic!("{rpc_url} should be supported: {error}"));
+		}
 	}
 }

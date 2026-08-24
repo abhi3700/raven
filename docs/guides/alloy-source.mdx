@@ -3,9 +3,30 @@ title: "Alloy event source"
 description: "How Raven polls JSON-RPC, catches up missed blocks, and delivers normalized events."
 ---
 
-`AlloySource` is Raven's current chain adapter. It works with standard HTTP
-Ethereum JSON-RPC endpoints and publishes normalized events through a bounded
-Tokio channel.
+`AlloySource` is Raven's current chain adapter. It works with standard HTTP(S)
+and WebSocket (WS/WSS) Ethereum JSON-RPC endpoints and publishes normalized
+events through a bounded Tokio channel.
+
+## Transport selection
+
+Alloy selects the transport from the endpoint scheme. Raven keeps one source
+contract and one polling algorithm across both transports:
+
+```mermaid
+flowchart LR
+    url[RPC URL] --> scheme{URL scheme}
+    scheme -->|http or https| http[HTTP transport]
+    scheme -->|ws or wss| ws[WebSocket transport]
+    http --> provider[Alloy Provider]
+    ws --> provider
+    provider --> polling[Ordered block polling and catch-up]
+    polling --> events[Normalized ChainEvent values]
+```
+
+WebSocket support establishes a persistent WS/WSS JSON-RPC connection, but the
+source intentionally continues calling `eth_blockNumber` and
+`eth_getBlockByNumber`. It does not currently switch to `eth_subscribe`, so
+ordering and missed-block catch-up behave identically across transports.
 
 ## Polling flow
 
@@ -21,8 +42,8 @@ flowchart TD
     channel --> poll
 ```
 
-The source uses polling instead of filter APIs such as `eth_newBlockFilter`
-because public HTTP providers support filters inconsistently.
+The source uses polling instead of filter or subscription APIs because public
+providers support them inconsistently.
 
 ## Catch-up behavior
 
@@ -55,6 +76,9 @@ while let Some(event) = receiver.recv().await {
 }
 ```
 
+Replace the constructor URL with `ws://...` or `wss://...` to use WebSocket;
+the remaining source code is unchanged.
+
 `AlloySource::run` rejects a zero polling interval before connecting. The CLI
 also validates `--poll-interval-ms` as greater than zero.
 
@@ -70,7 +94,6 @@ also validates `--poll-interval-ms` as greater than zero.
 
 ## Current limitations
 
-- Only HTTP JSON-RPC is configured by the source.
 - Historical blocks before the startup height are not backfilled.
 - Reorganizations are not detected.
 - `BlockReverted` is never emitted by this source.

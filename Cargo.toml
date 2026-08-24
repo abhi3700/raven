@@ -21,6 +21,7 @@ alloy = { version = "2.1", features = [
     "network",
     "providers",
     "provider-http",
+    "provider-ws",
     "rpc-types",
     "reqwest",
 ] }

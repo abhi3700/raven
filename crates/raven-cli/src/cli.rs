@@ -2,7 +2,11 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 
 /// Raven command-line arguments.
 #[derive(Debug, Parser)]
-#[command(name = "raven", version, about = "A programmable event engine for EVM chains")]
+#[command(
+	name = "raven",
+	version,
+	about = "A programmable blockchain event runtime powered by plugins"
+)]
 pub(crate) struct Cli {
 	#[command(subcommand)]
 	pub(crate) command: Option<Command>,
@@ -34,8 +38,8 @@ pub(crate) struct RunArgs {
 	#[arg(long, value_enum, default_value_t = EventSource::Alloy)]
 	pub(crate) source: EventSource,
 
-	/// Ethereum-compatible JSON-RPC endpoint.
-	#[arg(long, env = "RAVEN_RPC_URL")]
+	/// Ethereum-compatible HTTP(S) or WS(S) JSON-RPC endpoint.
+	#[arg(long, env = "NODE_RPC_URL")]
 	pub(crate) rpc_url: String,
 
 	/// Delay between block-number polls.
@@ -60,12 +64,14 @@ pub(crate) enum PluginCommand {
 	/// Install a plugin (planned).
 	Install {
 		/// Plugin name, for example `erc20-transfer`.
+		#[arg(value_name = "PLUGIN")]
 		name: String,
 	},
 
 	/// Remove an installed plugin (planned).
 	Remove {
 		/// Plugin name.
+		#[arg(value_name = "PLUGIN")]
 		name: String,
 	},
 }
@@ -109,5 +115,18 @@ mod tests {
 		]);
 
 		assert!(result.is_err());
+	}
+
+	#[test]
+	fn parses_plugin_install_name() {
+		let cli = Cli::try_parse_from(["raven", "plugins", "install", "whale-detector"])
+			.expect("plugin install command should parse");
+
+		let Some(Command::Plugins { command: PluginCommand::Install { name } }) = cli.command
+		else {
+			panic!("plugin install command should be selected");
+		};
+
+		assert_eq!(name, "whale-detector");
 	}
 }
