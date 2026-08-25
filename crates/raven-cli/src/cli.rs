@@ -1,11 +1,26 @@
-use clap::{Args, Parser, Subcommand};
+use clap::{
+	Args, Parser, Subcommand,
+	builder::styling::{AnsiColor, Effects, Styles},
+};
+
+const RAVEN_STYLES: Styles = Styles::styled()
+	.header(AnsiColor::BrightBlue.on_default().effects(Effects::BOLD))
+	.usage(AnsiColor::BrightCyan.on_default().effects(Effects::BOLD))
+	.literal(AnsiColor::Cyan.on_default().effects(Effects::BOLD))
+	.placeholder(AnsiColor::BrightBlack.on_default())
+	.error(AnsiColor::BrightRed.on_default().effects(Effects::BOLD))
+	.valid(AnsiColor::BrightGreen.on_default().effects(Effects::BOLD))
+	.invalid(AnsiColor::BrightYellow.on_default().effects(Effects::BOLD))
+	.context(AnsiColor::BrightBlack.on_default())
+	.context_value(AnsiColor::BrightCyan.on_default());
 
 /// Raven command-line arguments.
 #[derive(Debug, Parser)]
 #[command(
 	name = "raven",
 	version,
-	about = "A programmable blockchain event runtime powered by plugins"
+	about = "A programmable blockchain event runtime powered by plugins",
+	styles = RAVEN_STYLES
 )]
 pub(crate) struct Cli {
 	#[command(subcommand)]
@@ -91,6 +106,15 @@ pub(crate) enum PluginCommand {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use clap::{ColorChoice, CommandFactory};
+
+	#[test]
+	fn renders_styled_help_when_color_is_enabled() {
+		let help = Cli::command().color(ColorChoice::Always).render_help();
+		let ansi_help = format!("{}", help.ansi());
+
+		assert!(ansi_help.contains("\u{1b}["));
+	}
 
 	#[test]
 	fn parses_rpc_run_configuration() {

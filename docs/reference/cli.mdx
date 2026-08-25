@@ -18,6 +18,14 @@ top-level help. `raven run` also prints the banner before starting the runtime.
 Management commands such as `plugins`, `doctor`, and `config` use compact output
 so their result is immediately visible and easy to use in scripts.
 
+Interactive terminals use Raven's blue and cyan palette, with green success,
+yellow warning, and red error states. Redirected output falls back to plain text,
+and the standard `NO_COLOR` environment variable disables color explicitly:
+
+```bash
+NO_COLOR=1 raven plugins list
+```
+
 ## `raven run`
 
 Start the event-processing loop.
@@ -58,7 +66,7 @@ flowchart LR
     command["raven run"] --> endpoint["EVM JSON-RPC endpoint"]
     endpoint --> scheme{URL scheme}
     scheme -->|HTTP or HTTPS| polling[Polling]
-    scheme -->|WS or WSS| subscription[Subscription plus reconciliation]
+    scheme -->|WS or WSS| subscription[Subscription + reconciliation]
 ```
 
 Reth ExEx ingestion will not be added as `raven run --source reth`. An ExEx is
@@ -186,11 +194,11 @@ Clearing is idempotent: running it when no config file exists still succeeds.
 
 Raven stores the file in the native per-user config directory:
 
-| Platform | Default path |
-| --- | --- |
-| macOS | `~/Library/Application Support/raven/config.json` |
+| Platform             | Default path                                                           |
+| -------------------- | ---------------------------------------------------------------------- |
+| macOS                | `~/Library/Application Support/raven/config.json`                      |
 | Linux and other Unix | `$XDG_CONFIG_HOME/raven/config.json`, or `~/.config/raven/config.json` |
-| Windows | `%APPDATA%\raven\config.json` |
+| Windows              | `%APPDATA%\raven\config.json`                                          |
 
 Set `RAVEN_CONFIG_DIR` to override the directory, which is especially useful
 for isolated development and automated tests.
@@ -205,3 +213,9 @@ RUST_LOG=raven=debug,raven_source_alloy=debug \
 ```
 
 The default filter enables info logs for the CLI and Alloy-backed RPC adapter.
+
+In an interactive terminal, Raven also colors structured log fields by value
+type: strings and URLs are cyan, numbers are yellow, booleans are green or red,
+hashes are magenta, and errors are red. Field names remain dim so values are
+easy to scan. These colors follow the same ANSI and `NO_COLOR` behavior as the
+rest of the CLI.
