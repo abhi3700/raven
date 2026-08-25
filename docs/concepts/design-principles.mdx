@@ -8,8 +8,8 @@ sits between chain-data adapters and application logic:
 
 ```mermaid
 flowchart LR
-    rpc[EVM JSON-RPC] --> alloy[Alloy source]
-    reth[Reth ExEx source] -. planned .-> event[Normalized ChainEvent]
+    rpc[EVM JSON-RPC] --> alloy[Alloy-backed RPC adapter]
+    reth[Embedded Reth ExEx] -. planned .-> event[Normalized ChainEvent]
     alloy --> event
     event --> runtime[Raven Runtime]
     runtime --> dispatcher[Dispatcher]
@@ -18,8 +18,8 @@ flowchart LR
     dispatcher --> whale[Whale plugin]
 ```
 
-Only the Alloy path and generic plugin dispatch exist today. The Reth adapter
-and example domain plugins in the diagram are planned.
+Only the RPC path and generic plugin dispatch exist today. The Reth adapter and
+example domain plugins in the diagram are planned.
 
 ## What Raven is
 
@@ -61,12 +61,12 @@ non-chain services such as a database or notification provider.
 
 | Boundary | Rule | Current enforcement |
 | --- | --- | --- |
-| Source | Convert source-native data into `ChainEvent` | Implemented by `raven-source-alloy` |
+| Source | Convert source-native data into `ChainEvent` | Implemented for JSON-RPC by `raven-source-alloy` |
 | Core | Prevent invalid normalized values from entering the runtime | Constructors, private fields, and validated deserialization |
 | Runtime | Accept events for exactly one EIP-155 chain ID | Checked before every dispatch |
 | Dispatcher | Attempt non-blocking fan-out to every plugin worker | Independent bounded mailboxes and live outcomes |
 | Plugin | Depend on normalized events, not a specific source | Enforced by the `Plugin` trait API |
-| CLI | Compose a source, runtime, and configured plugins | Alloy plus a built-in block logger today |
+| CLI | Compose ingestion, runtime, and configured plugins | JSON-RPC plus a built-in block logger today |
 
 The source ownership rule is an architectural contract rather than a sandbox:
 Rust cannot prevent a plugin from opening its own RPC connection. Reviews and
@@ -96,8 +96,8 @@ separate replay/checkpoint contract rather than an unbounded in-memory queue.
 
 ## Add the right extension
 
-Use a **source adapter** when the input mechanism changes, for example Alloy
-polling versus Reth ExEx notifications. Use a **plugin** when application
+Use a **source adapter** when the input mechanism changes, for example JSON-RPC
+ingestion versus Reth ExEx notifications. Use a **plugin** when application
 behavior changes, for example detecting a large ERC-20 transfer or delivering
 an alert.
 

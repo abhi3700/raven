@@ -6,7 +6,8 @@ description: "Connect Raven to an EVM JSON-RPC endpoint and process live block e
 ## 1. Choose an RPC endpoint
 
 Raven supports EVM-compatible HTTP(S) and WebSocket (WS/WSS) JSON-RPC
-endpoints through Alloy. You may use a local node or a hosted provider.
+endpoints through an Alloy-backed adapter. You may use a local node or a hosted
+provider; both use the same RPC ingestion path.
 
 Persist the endpoint once:
 
@@ -33,14 +34,13 @@ RPC URL resolution follows this precedence:
 From the workspace root:
 
 ```bash
-cargo run -p raven -- run --source alloy
+cargo run -p raven -- run
 ```
 
 You can pass the endpoint directly instead:
 
 ```bash
 raven run \
-  --source alloy \
   --rpc-url https://your-evm-rpc.example
 ```
 
@@ -63,6 +63,10 @@ fetches full blocks and passes normalized events through the runtime. HTTP(S)
 endpoints use block-number polling. WS(S) endpoints use `newHeads`
 subscriptions for immediate notification plus a slower safety reconciliation.
 The CLI's built-in `block-logger` plugin logs each processed block.
+
+There is no `--source alloy` option. Alloy is the current Rust implementation
+of RPC ingestion, not a deployment choice. Raven infers HTTP polling versus
+WebSocket subscriptions from the endpoint scheme.
 
 <Note>
     Chain agnostic means one Raven process can bind to any EVM chain. A running
@@ -103,7 +107,7 @@ A longer interval reduces safety requests but increases the worst-case time to
 discover such a gap. Both interval values must be greater than zero.
 
 <Warning>
-    The Alloy source currently starts from the latest block observed at startup
+    The RPC source currently starts from the latest block observed at startup
     and does not backfill older history. It also emits applied blocks only;
     reorg detection is planned.
 </Warning>
@@ -119,7 +123,7 @@ discover such a gap. Both interval values must be greater than zero.
         Add application-specific event handling.
     </Card>
     <Card
-        title="Alloy source behavior"
+        title="RPC ingestion behavior"
         icon="radio"
         href="/docs/guides/alloy-source"
     >

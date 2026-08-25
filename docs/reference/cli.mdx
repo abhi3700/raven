@@ -29,7 +29,6 @@ raven run [--rpc-url <URL>] [OPTIONS]
 | Option                              | Environment    | Default      | Description                                                   |
 | ----------------------------------- | -------------- | ------------ | ------------------------------------------------------------- |
 | `--rpc-url <URL>`                   | `NODE_RPC_URL` | Saved config | EVM-compatible HTTP(S) or WS(S) JSON-RPC endpoint             |
-| `--source <SOURCE>`                 | —              | `alloy`      | Event source; currently only `alloy`                          |
 | `--poll-interval-ms <MS>`           | —              | `4000`       | HTTP(S) block-number poll interval; must be greater than zero |
 | `--reconciliation-interval-ms <MS>` | —              | `30000`      | WS(S) safety reconciliation; must be greater than zero        |
 
@@ -37,7 +36,6 @@ Example:
 
 ```bash
 raven run \
-  --source alloy \
   --rpc-url http://localhost:8545 \
   --poll-interval-ms 1000
 ```
@@ -47,6 +45,30 @@ or `wss://`. Raven discovers its chain ID with `eth_chainId`; there is no
 hard-coded allowlist. HTTP(S) uses the polling interval. WS(S) uses
 `eth_subscribe("newHeads")` as its primary trigger and the reconciliation
 interval as a safety check. Both feed the same ordered full-block catch-up path.
+
+### Why there is no `--source`
+
+`raven run` is the standalone JSON-RPC deployment. Alloy is the Rust library
+that currently implements this path; it is not an operator-facing source type.
+Likewise, a self-hosted RPC endpoint and a hosted provider expose the same
+protocol, and the endpoint URL cannot reliably identify who operates it.
+
+```mermaid
+flowchart LR
+    command["raven run"] --> endpoint["EVM JSON-RPC endpoint"]
+    endpoint --> scheme{URL scheme}
+    scheme -->|HTTP or HTTPS| polling[Polling]
+    scheme -->|WS or WSS| subscription[Subscription plus reconciliation]
+```
+
+Reth ExEx ingestion will not be added as `raven run --source reth`. An ExEx is
+compiled into the same binary as Reth and launched with the node, so the
+planned integration is a separate Raven-enabled Reth binary with its own node
+arguments. This keeps incompatible deployment configuration out of
+`raven run` and keeps the default CLI free of Reth's dependency footprint.
+
+Passing the removed `--source` option is an error. Existing commands should
+drop `--source alloy`; no replacement option is needed.
 
 The RPC URL is resolved before Raven starts:
 
@@ -182,4 +204,4 @@ RUST_LOG=raven=debug,raven_source_alloy=debug \
   raven run --rpc-url http://localhost:8545
 ```
 
-The default filter enables info logs for the CLI and Alloy source.
+The default filter enables info logs for the CLI and Alloy-backed RPC adapter.

@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-/// Result returned by the Alloy event source.
+/// Result returned by the Alloy-backed RPC event source.
 pub type AlloySourceResult<T = ()> = Result<T, AlloySourceError>;
 
 /// Errors produced while connecting to or reading from an Alloy provider.

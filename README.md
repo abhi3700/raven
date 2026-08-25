@@ -27,8 +27,9 @@ flowchart LR
     runtime --> plugins[Plugins]
 ```
 
-The Alloy source owns JSON-RPC access, `raven-core` owns validated event types,
-the runtime owns lifecycle and dispatch, and plugins own application logic.
+The RPC source, currently backed by Alloy, owns JSON-RPC access. `raven-core`
+owns validated event types, the runtime owns lifecycle and dispatch, and
+plugins own application logic.
 
 ## Current features
 
@@ -40,7 +41,7 @@ the runtime owns lifecycle and dispatch, and plugins own application logic.
 - Error isolation and panic quarantine without blocking sibling plugins
 - Automatic EIP-155 chain discovery with no chain allowlist
 - Runtime state and per-chain validation
-- Transport-aware Alloy ingestion: HTTP polling or WS subscriptions with reconciliation
+- Transport-aware JSON-RPC ingestion backed by Alloy: HTTP polling or WS subscriptions with reconciliation
 - Persistent RPC URL configuration with CLI and environment overrides
 - Working CLI orchestration with graceful Ctrl+C shutdown
 - Normalized event boundary designed for future Reth ExEx support
@@ -72,7 +73,6 @@ Pass an endpoint directly:
 
 ```bash
 cargo run -p raven -- run \
-  --source alloy \
   --rpc-url https://your-evm-rpc.example
 ```
 
@@ -130,6 +130,16 @@ raven run \
 
 Use `cargo run -p raven -- --help` for the full CLI help.
 
+`raven run` always means standalone JSON-RPC ingestion, so it has no
+`--source alloy` option. Whether the endpoint is a hosted provider or your own
+local node does not change this data path; the URL scheme selects HTTP polling
+or WebSocket subscription behavior.
+
+Future Reth ExEx support has a different deployment model. An ExEx is compiled
+into and launched with a Reth node, so Raven plans to provide a separate
+Raven-enabled Reth binary rather than pretending it can attach to an existing
+node through a `--source reth` flag.
+
 ## Write a plugin
 
 ```rust
@@ -178,7 +188,7 @@ raven/
 │   ├── raven-core/          # Validated normalized chain events
 │   ├── raven-plugin-sdk/    # Plugin contract and context
 │   ├── raven-runtime/       # Registry, lifecycle, and dispatcher
-│   └── raven-source-alloy/  # Alloy HTTP/WebSocket JSON-RPC source
+│   └── raven-source-alloy/  # Alloy-backed HTTP/WebSocket JSON-RPC source
 ├── docs/                    # Mintlify MDX pages
 ├── docs.json                # Mintlify site configuration
 ├── res/                     # Brand assets

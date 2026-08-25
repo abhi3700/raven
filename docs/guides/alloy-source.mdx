@@ -1,12 +1,16 @@
 ---
-title: "Alloy event source"
-description: "How Raven combines HTTP polling or WebSocket subscriptions with ordered block reconciliation."
+title: "RPC ingestion with Alloy"
+description: "How Raven's Alloy-backed RPC adapter combines polling or WebSocket subscriptions with ordered reconciliation."
 ---
 
-`AlloySource` is Raven's current chain adapter. It connects to EVM-compatible
-HTTP(S) and WS(S) JSON-RPC endpoints, fetches full blocks, converts them into
-normalized `ChainEvent` values, and publishes them through a bounded Tokio
-channel.
+`AlloySource` is the internal adapter behind `raven run`. It connects to
+EVM-compatible HTTP(S) and WS(S) JSON-RPC endpoints, fetches full blocks,
+converts them into normalized `ChainEvent` values, and publishes them through a
+bounded Tokio channel.
+
+The CLI does not expose `--source alloy`: Alloy is the implementation of the
+current RPC path, not an operator-selected deployment mode. The endpoint may be
+hosted or self-managed; the URL scheme selects the transport behavior.
 
 ## Production strategy
 

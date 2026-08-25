@@ -12,17 +12,17 @@ use tokio::{
 };
 use tracing::{debug, error, info, warn};
 
-use crate::cli::{EventSource, RunArgs};
+use crate::cli::RunArgs;
 
 const EVENT_CHANNEL_CAPACITY: usize = 256;
 
-/// Runs the configured event source until it stops or the user presses Ctrl+C.
+/// Runs RPC ingestion until it stops or the user presses Ctrl+C.
 pub(crate) async fn run(args: RunArgs, rpc_url: String) -> Result<()> {
 	let (event_sender, mut event_receiver) = mpsc::channel(EVENT_CHANNEL_CAPACITY);
-	let source_task = spawn_source(&args, rpc_url, event_sender);
+	let source_task = spawn_rpc_source(&args, rpc_url, event_sender);
 	let mut runtime = None;
 
-	info!(source = ?args.source, "Raven is running; press Ctrl+C to stop");
+	info!(ingestion = "rpc", "Raven is running; press Ctrl+C to stop");
 
 	let event_loop_result: Result<EventLoopExit> = loop {
 		tokio::select! {
@@ -61,7 +61,7 @@ pub(crate) async fn run(args: RunArgs, rpc_url: String) -> Result<()> {
 	shutdown_result
 }
 
-fn spawn_source(
+fn spawn_rpc_source(
 	args: &RunArgs,
 	rpc_url: String,
 	event_sender: mpsc::Sender<ChainEvent>,
@@ -69,15 +69,11 @@ fn spawn_source(
 	let poll_interval = Duration::from_millis(args.poll_interval_ms);
 	let reconciliation_interval = Duration::from_millis(args.reconciliation_interval_ms);
 
-	match args.source {
-		EventSource::Alloy => {
-			let source = AlloySource::new(rpc_url)
-				.with_poll_interval(poll_interval)
-				.with_reconciliation_interval(reconciliation_interval);
+	let source = AlloySource::new(rpc_url)
+		.with_poll_interval(poll_interval)
+		.with_reconciliation_interval(reconciliation_interval);
 
-			tokio::spawn(async move { source.run(event_sender).await.map_err(Into::into) })
-		},
-	}
+	tokio::spawn(async move { source.run(event_sender).await.map_err(Into::into) })
 }
 
 async fn process_event(runtime: &mut Option<RuntimeSession>, event: ChainEvent) -> Result<()> {

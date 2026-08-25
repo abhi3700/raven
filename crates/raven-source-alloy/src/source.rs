@@ -1,9 +1,9 @@
-//! # Alloy Event Source
+//! # Alloy-backed RPC Event Source
 //!
-//! This module implements Raven's transport-aware Alloy event source. HTTP(S)
-//! endpoints are polled, while WS(S) endpoints use `eth_subscribe("newHeads")`
-//! for low-latency notifications and periodically reconcile with
-//! `eth_blockNumber` to recover any notification gaps.
+//! This module implements Raven's transport-aware JSON-RPC ingestion with
+//! Alloy. HTTP(S) endpoints are polled, while WS(S) endpoints use
+//! `eth_subscribe("newHeads")` for low-latency notifications and periodically
+//! reconcile with `eth_blockNumber` to recover any notification gaps.
 //!
 //! Both transports feed the same ordered catch-up path:
 //!
@@ -48,7 +48,7 @@ pub struct AlloySource {
 }
 
 impl AlloySource {
-	/// Creates an Alloy source with production-oriented default intervals.
+	/// Creates an Alloy-backed RPC source with production-oriented defaults.
 	pub fn new(rpc_url: impl Into<String>) -> Self {
 		Self {
 			rpc_url: rpc_url.into(),
@@ -100,7 +100,7 @@ impl AlloySource {
 		info!(
 			rpc_url = %self.rpc_url,
 			transport = %transport,
-			"connecting Alloy event source"
+			"connecting RPC event source"
 		);
 
 		match transport {

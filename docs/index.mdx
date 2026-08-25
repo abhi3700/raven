@@ -9,7 +9,7 @@ delivers those events to reusable plugins.
 
 <CardGroup cols={2}>
   <Card title="Run Raven" icon="rocket" href="/docs/getting-started/quickstart">
-    Stream blocks from any standard EVM JSON-RPC endpoint with the Alloy source.
+    Stream blocks from any standard EVM JSON-RPC endpoint.
   </Card>
   <Card title="Build a plugin" icon="plug" href="/docs/guides/create-a-plugin">
     React to normalized chain events with a small Rust trait.
@@ -44,7 +44,7 @@ runtime owns lifecycle and dispatch. Plugins own application behavior.
 
 ## Current capabilities
 
-- Ingest from EVM-compatible HTTP(S) polling or WS(S) subscriptions with Alloy.
+- Ingest from EVM-compatible HTTP(S) polling or WS(S) subscriptions through an Alloy-backed RPC adapter.
 - Discover the endpoint's EIP-155 chain ID.
 - Accept any non-zero chain ID without a hard-coded chain allowlist.
 - Reconcile and fetch every observed block height in ascending order.

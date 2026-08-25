@@ -6,8 +6,8 @@
 //! manually constructs a `ChainEvent` and invokes the plugin lifecycle.
 //!
 //! Eventually, this example will be replaced with a live version that receives
-//! events from the Alloy source, making it a good reference for writing custom
-//! Raven plugins.
+//! events from Raven's RPC source, making it a good reference for writing
+//! custom Raven plugins.
 
 use async_trait::async_trait;
 use eyre::Result;

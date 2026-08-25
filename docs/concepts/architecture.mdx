@@ -20,7 +20,7 @@ Arrows mean "depends on":
 
 ```mermaid
 flowchart TD
-    ravenCli["raven CLI"] --> alloySource["raven-source-alloy"]
+    ravenCli["raven CLI"] --> alloySource["Alloy-backed RPC adapter"]
     ravenCli --> runtimeCrate["raven-runtime"]
     ravenCli --> pluginSdk["raven-plugin-sdk"]
     ravenCli --> coreCrate["raven-core"]
@@ -39,6 +39,67 @@ flowchart TD
 | Plugin | Stateful application behavior for normalized events | Shared chain ingestion |
 | CLI | Config persistence, source/runtime composition, logging, Ctrl+C, and graceful shutdown | Reusable domain logic |
 
+### Deployment modes and the CLI boundary
+
+Raven distinguishes ingestion mechanisms, not who owns an RPC endpoint. A
+self-hosted node and a hosted provider both expose JSON-RPC, and a URL cannot
+reliably prove whether a proxy or endpoint is operated locally.
+
+```mermaid
+flowchart TB
+    subgraph current["Current: standalone RPC deployment"]
+        ravenRun["raven run"] --> rpc["Local or hosted EVM JSON-RPC"]
+        rpc --> rpcAdapter["Alloy-backed RPC adapter"]
+        rpcAdapter --> eventsA["Normalized ChainEvent"]
+    end
+
+    subgraph planned["Planned: embedded Reth deployment"]
+        ravenReth["Raven-enabled Reth binary"] --> exex["Raven ExEx task"]
+        rethNode["Reth node components and notifications"] --> exex
+        exex --> eventsB["Normalized ChainEvent"]
+    end
+
+    eventsA --> runtime["Same Raven runtime and plugins"]
+    eventsB --> runtime
+```
+
+The current operator interface is therefore intentionally small:
+
+```bash
+raven run --rpc-url https://your-evm-rpc.example
+```
+
+There is no `--source alloy` option. Alloy is an internal client-library choice,
+while the URL scheme is a real runtime choice: HTTP(S) selects polling and
+WS(S) selects subscriptions plus reconciliation.
+
+Reth ExEx is a different deployment topology, not another value for the same
+flag. Reth documents that ExEx tasks are compiled into the node binary and run
+alongside the node through shared memory; they do not attach to an existing
+Reth process. Raven therefore plans a separate, version-pinned Raven-enabled
+Reth binary rather than `raven run --source reth`. That binary will translate
+commit, revert, and reorg notifications into the same validated event model and
+can use the node provider for additional state reads.
+
+Reading an active Reth database directly from a separate Raven process is not
+the planned production boundary. It would couple Raven to Reth's storage layout
+and still would not itself provide a coherent stream of canonical commits,
+reverts, and reorgs. ExEx supplies that lifecycle-aware stream. If Raven must
+remain a separate process, a remote ExEx bridge can explicitly stream
+notifications over a versioned protocol; Reth documents gRPC as one example.
+
+| Situation | Raven path |
+| --- | --- |
+| Hosted EVM endpoint | `raven run --rpc-url ...` |
+| Self-hosted node exposing HTTP(S) or WS(S) | `raven run --rpc-url ...` |
+| Existing Reth node without Raven compiled in | Use its RPC endpoint, or restart with the planned Raven-enabled binary |
+| Zero-RPC, in-process Reth access | Planned Raven ExEx integration |
+| Separate Raven process receiving ExEx events | Possible future remote-ExEx adapter, not direct DB access |
+
+See Reth's [ExEx overview](https://reth.rs/exex/overview/) and
+[remote ExEx guide](https://reth.rs/exex/remote/) for the underlying execution
+and process boundaries.
+
 ### Chain-agnostic runtime binding
 
 Raven has no chain allowlist. The source discovers any non-zero EIP-155 chain
@@ -48,7 +109,7 @@ after receiving the first event:
 ```mermaid
 sequenceDiagram
     participant RPC as EVM RPC
-    participant Source as AlloySource
+    participant Source as RPC adapter
     participant CLI
     participant Runtime
     participant Plugin
@@ -112,7 +173,7 @@ which remain planned.
 
 ```mermaid
 flowchart LR
-    chain["EVM JSON-RPC"] --> source["AlloySource"]
+    chain["EVM JSON-RPC"] --> source["Alloy-backed RPC adapter"]
     source --> sourceQueue["Bounded source channel"]
     sourceQueue --> runtime["Runtime validation"]
     runtime --> dispatcher["Non-blocking Dispatcher"]

@@ -15,7 +15,7 @@ flowchart LR
     reliability --> eventModel[2. Event model and replay]
     eventModel --> firstPlugin[3. Large transfer vertical slice]
     firstPlugin --> pluginPlatform[4. Plugin operations]
-    reliability --> secondSource[5. Reth ExEx source]
+    reliability --> secondSource[5. Reth ExEx integration]
     eventModel --> secondSource
     pluginPlatform --> scale[6. Isolation and scale]
     secondSource --> scale
@@ -42,6 +42,7 @@ overlap when it does not require an undecided contract.
 - [x] Alloy WS(S) `newHeads` subscription with periodic reconciliation
 - [x] Ordered catch-up across blocks missed between polls or notifications
 - [x] Persistent RPC URL configuration with CLI and environment precedence
+- [x] RPC-focused `raven run` interface without an implementation-specific source flag
 - [x] Working `raven run` orchestration and Ctrl+C shutdown
 - [x] Built-in block logging
 
@@ -131,8 +132,14 @@ not-implemented errors until this phase.
 
 ## Additional sources and scale
 
-- [ ] Build `raven-source-reth` from ExEx notifications into the same validated
-  event model.
+- [ ] Build `raven-source-reth` to translate ExEx commit, revert, and reorg
+  notifications into the same validated event model.
+- [ ] Package the adapter in a separate, version-pinned Raven-enabled Reth
+  binary that installs the ExEx and launches the node.
+- [ ] Use `ExExContext` node components and providers for additional state
+  reads instead of opening an active Reth database from a sidecar process.
+- [ ] Evaluate a versioned remote-ExEx stream only if Raven needs process
+  isolation from Reth; keep it distinct from the standalone RPC path.
 - [ ] Compare Alloy and Reth behavior, then extract a shared source trait if the
   two implementations demonstrate a useful common interface.
 - [x] Use WebSocket subscriptions with ordered height-gap reconciliation.
@@ -149,6 +156,7 @@ not-implemented errors until this phase.
 | At-least-once delivery and checkpoint commit point | Determines replay and plugin idempotency |
 | Reorg depth and finality policy | Determines canonical-state correction |
 | Core versus derived event granularity | Determines source cost and plugin portability |
+| Reth version support policy | Determines how the Raven-enabled node binary is released and upgraded |
 | Plugin timeout and restart policy | Determines supervision and recovery guarantees |
 | Static versus dynamic plugin packaging | Determines security, compatibility, and CLI design |
 

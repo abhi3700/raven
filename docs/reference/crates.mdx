@@ -10,7 +10,7 @@ Raven is organized as a Cargo workspace with five crates.
 | `raven-core` | Library | Validated, source-independent chain types |
 | `raven-plugin-sdk` | Library | Plugin trait, context, metadata, and errors |
 | `raven-runtime` | Library | Plugin registration, lifecycle, validation, and dispatch |
-| `raven-source-alloy` | Library | HTTP polling, WS subscriptions with reconciliation, and Alloy-to-Raven conversion |
+| `raven-source-alloy` | Library | Alloy-backed JSON-RPC polling, WS subscriptions, reconciliation, and normalization |
 | `raven` | Binary | CLI parsing and source/runtime orchestration |
 
 ## `raven-core`
@@ -67,8 +67,9 @@ Public exports:
 - `AlloySourceError`
 - `AlloySourceResult`
 
-Alloy block conversion remains private so source-native types do not leak into
-the rest of the workspace.
+This crate is the implementation behind the CLI's RPC ingestion; operators do
+not select it with a source flag. Alloy block conversion remains private so
+source-native types do not leak into the rest of the workspace.
 
 ## `raven`
 
@@ -77,7 +78,7 @@ The binary crate owns:
 - Command-line parsing.
 - Persistent RPC URL configuration and override resolution.
 - Tracing initialization.
-- Source task creation.
+- Alloy-backed RPC task creation.
 - Runtime initialization from the first discovered event.
 - Ctrl+C handling and graceful shutdown.
 - The built-in block logger used by `raven run`.

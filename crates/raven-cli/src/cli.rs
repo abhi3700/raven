@@ -1,4 +1,4 @@
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Args, Parser, Subcommand};
 
 /// Raven command-line arguments.
 #[derive(Debug, Parser)]
@@ -15,7 +15,7 @@ pub(crate) struct Cli {
 /// Commands supported by the Raven CLI.
 #[derive(Debug, Subcommand)]
 pub(crate) enum Command {
-	/// Start processing chain events.
+	/// Process chain events from an EVM JSON-RPC endpoint.
 	Run(RunArgs),
 
 	/// Manage Raven plugins.
@@ -37,10 +37,6 @@ pub(crate) enum Command {
 /// Configuration for the event-processing loop.
 #[derive(Debug, Args)]
 pub(crate) struct RunArgs {
-	/// Event source used to ingest chain data.
-	#[arg(long, value_enum, default_value_t = EventSource::Alloy)]
-	pub(crate) source: EventSource,
-
 	/// EVM-compatible HTTP(S) or WS(S) JSON-RPC endpoint.
 	#[arg(long, env = "NODE_RPC_URL")]
 	pub(crate) rpc_url: Option<String>,
@@ -52,14 +48,6 @@ pub(crate) struct RunArgs {
 	/// WS(S) safety interval for reconciling missed block notifications.
 	#[arg(long, default_value_t = 30_000, value_parser = clap::value_parser!(u64).range(1..))]
 	pub(crate) reconciliation_interval_ms: u64,
-}
-
-/// Event sources supported by the CLI.
-#[derive(Debug, Clone, Copy, Default, ValueEnum)]
-pub(crate) enum EventSource {
-	/// Ingest an EVM JSON-RPC endpoint through Alloy.
-	#[default]
-	Alloy,
 }
 
 /// Persistent-configuration commands.
@@ -105,12 +93,10 @@ mod tests {
 	use super::*;
 
 	#[test]
-	fn parses_alloy_run_configuration() {
+	fn parses_rpc_run_configuration() {
 		let cli = Cli::try_parse_from([
 			"raven",
 			"run",
-			"--source",
-			"alloy",
 			"--rpc-url",
 			"http://localhost:8545",
 			"--poll-interval-ms",
@@ -122,10 +108,16 @@ mod tests {
 			panic!("run command should be selected");
 		};
 
-		assert!(matches!(args.source, EventSource::Alloy));
 		assert_eq!(args.rpc_url.as_deref(), Some("http://localhost:8545"));
 		assert_eq!(args.poll_interval_ms, 1_000);
 		assert_eq!(args.reconciliation_interval_ms, 30_000);
+	}
+
+	#[test]
+	fn rejects_removed_source_option() {
+		let result = Cli::try_parse_from(["raven", "run", "--source", "alloy"]);
+
+		assert!(result.is_err());
 	}
 
 	#[test]
