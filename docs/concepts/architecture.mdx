@@ -1,6 +1,6 @@
 ---
 title: "Architecture"
-description: "HLD and LLD for Raven's event pipeline, independent plugin workers, delivery receipts, and live outcomes."
+description: "HLD and LLD for Raven's canonical event pipeline, checkpoints, independent plugin workers, delivery receipts, and live outcomes."
 ---
 
 Raven is a source-independent EVM event runtime with an actor-style plugin
@@ -32,12 +32,12 @@ flowchart TD
 
 | Layer | Responsibility | Does not own |
 | --- | --- | --- |
-| Source | Chain access, catch-up, and conversion into `ChainEvent` | Plugin behavior |
+| Source | Chain access, retry, canonical reconciliation, catch-up, and conversion into `ChainEvent` | Plugin behavior |
 | Core | Validated, source-independent event values | Runtime control messages |
 | Runtime | Chain validation, plugin lifecycle, mailboxes, dispatch, and outcomes | Protocol-specific application logic |
 | Plugin SDK | The `Plugin` contract, context, metadata, and error vocabulary | Scheduling policy |
 | Plugin | Stateful application behavior for normalized events | Shared chain ingestion |
-| CLI | Config persistence, source/runtime composition, logging, Ctrl+C, and graceful shutdown | Reusable domain logic |
+| CLI | Config and checkpoint persistence, reliability gate, composition, diagnostics, Ctrl+C, and graceful shutdown | Reusable domain logic |
 
 ### Deployment modes and the CLI boundary
 
@@ -53,8 +53,8 @@ flowchart TB
         rpcAdapter --> eventsA["Normalized ChainEvent"]
     end
 
-    subgraph planned["Planned: embedded Reth deployment"]
-        ravenReth["Raven-enabled Reth binary"] --> exex["Raven ExEx task"]
+    subgraph planned["Planned: Raven inside the Reth CLI"]
+        ravenReth["Raven-enabled reth node command"] --> exex["Raven ExEx task"]
         rethNode["Reth node components and notifications"] --> exex
         exex --> eventsB["Normalized ChainEvent"]
     end
@@ -76,10 +76,26 @@ WS(S) selects subscriptions plus reconciliation.
 Reth ExEx is a different deployment topology, not another value for the same
 flag. Reth documents that ExEx tasks are compiled into the node binary and run
 alongside the node through shared memory; they do not attach to an existing
-Reth process. Raven therefore plans a separate, version-pinned Raven-enabled
-Reth binary rather than `raven run --source reth`. That binary will translate
-commit, revert, and reorg notifications into the same validated event model and
-can use the node provider for additional state reads.
+Reth process. Raven therefore plans a version-pinned **Raven-enabled Reth CLI**,
+not `raven run --source reth`. Operators will run a normal Reth node command
+with Raven/plugin options; its node builder will install the Raven ExEx before
+launch. Raven then runs in-process alongside that node, while the standalone
+`raven` binary remains the lightweight RPC deployment.
+
+```text
+standalone: raven run --rpc-url ... -> Alloy RPC source -> Raven runtime
+
+embedded:   reth node [normal node args] + Raven plugin config
+                -> NodeBuilder::install_exex("raven", ...)
+                -> Raven runtime and plugins alongside the node
+```
+
+The embedded adapter will translate `ChainCommitted`, `ChainReverted`, and
+`ChainReorged` notifications into the same validated event model and can use
+`ExExContext` providers/components for additional state reads. Only after every
+Raven plugin has durably succeeded may it report Reth's `FinishedHeight`.
+Because that acknowledgement also allows Reth to prune older data, enqueueing
+alone is not sufficient.
 
 Reading an active Reth database directly from a separate Raven process is not
 the planned production boundary. It would couple Raven to Reth's storage layout
@@ -92,19 +108,21 @@ notifications over a versioned protocol; Reth documents gRPC as one example.
 | --- | --- |
 | Hosted EVM endpoint | `raven run --rpc-url ...` |
 | Self-hosted node exposing HTTP(S) or WS(S) | `raven run --rpc-url ...` |
-| Existing Reth node without Raven compiled in | Use its RPC endpoint, or restart with the planned Raven-enabled binary |
-| Zero-RPC, in-process Reth access | Planned Raven ExEx integration |
+| Existing Reth node without Raven compiled in | Use its RPC endpoint, or restart with the planned Raven-enabled Reth CLI |
+| Start Reth and Raven/plugins together without RPC | Planned Raven-enabled `reth node` command with an installed ExEx |
 | Separate Raven process receiving ExEx events | Possible future remote-ExEx adapter, not direct DB access |
 
-See Reth's [ExEx overview](https://reth.rs/exex/overview/) and
-[remote ExEx guide](https://reth.rs/exex/remote/) for the underlying execution
-and process boundaries.
+See Reth's [ExEx overview](https://reth.rs/exex/overview/), current
+[`install_exex` API](https://reth.rs/docs/reth/builder/struct.WithLaunchContext.html#method.install_exex),
+and [`ExExEvent::FinishedHeight`](https://reth.rs/docs/reth_exex/enum.ExExEvent.html)
+for the execution, CLI-builder, and acknowledgement boundaries.
 
 ### Chain-agnostic runtime binding
 
 Raven has no chain allowlist. The source discovers any non-zero EIP-155 chain
-ID and includes it in every normalized event. The CLI creates the runtime only
-after receiving the first event:
+ID and includes it in every normalized event. The CLI checks the endpoint first
+so it can select a chain-specific checkpoint and create the runtime before
+ingestion starts:
 
 ```mermaid
 sequenceDiagram
@@ -114,12 +132,14 @@ sequenceDiagram
     participant Runtime
     participant Plugin
 
-    Source->>RPC: eth_chainId
-    RPC-->>Source: arbitrary non-zero chain ID
-    Source-->>CLI: first ChainEvent(chain ID)
-    CLI->>Runtime: Runtime::new(event.chain_id())
+    CLI->>RPC: eth_chainId + eth_blockNumber
+    RPC-->>CLI: arbitrary non-zero chain ID + head
+    CLI->>CLI: load checkpoint for chain ID
+    CLI->>Runtime: Runtime::new(chain_id)
     Runtime->>Plugin: start(PluginContext(chain ID))
-    CLI->>Runtime: process(first event)
+    CLI->>Source: start RPC ingestion
+    Source-->>CLI: ChainEvent(chain ID)
+    CLI->>Runtime: process(event)
 ```
 
 A runtime remains single-chain by design: after binding, it rejects events with
@@ -148,26 +168,36 @@ HTTP(S) polls `eth_blockNumber` every four seconds by default. WS(S) uses
 every 30 seconds by default as a safety net. Subscription notifications are not
 treated as a complete or durable event log.
 
-At the low level, both paths update one monotonic `next_block_number` cursor:
+At the low level, both paths update one cursor plus a bounded canonical window:
 
 ```text
 head notification or reconciliation returns target N
-    └─► for height in next_block_number..=N
+    ├─► compare retained tip/ancestors with canonical RPC blocks
+    ├─► if forked: emit BlockReverted from old tip to common ancestor
+    └─► for every replacement or missing height through N
             ├─► eth_getBlockByNumber(height)
-            ├─► convert to ChainEvent::BlockApplied
-            ├─► send through bounded source channel
-            └─► advance cursor
+            ├─► verify parent linkage
+            ├─► emit ChainEvent::BlockApplied
+            └─► retain it in the bounded canonical window
 ```
 
 Subscribing before reading the initial height closes the startup race. Fetching
 all heights through each target closes intermediate gaps when notifications are
 coalesced or missed. Duplicate and stale notifications below the cursor are
-ignored. Periodic reconciliation closes gaps across WebSocket lag or reconnect,
-while Alloy owns transport reconnection and subscription restoration.
+reconciled against retained ancestry. Raven reconnects transient connection,
+request, subscription, temporary-omission, and mid-reconciliation canonical
+failures with capped exponential backoff plus jitter. Retry logs include the
+attempt, delay, and cause. Invalid configuration, conversion failure, receiver
+loss, checkpoint/chain mismatch, and a fork deeper than the retained window are
+terminal.
 
-This monotonic cursor is not yet reorg-aware: a replacement block at an already
-emitted height requires canonical ancestry tracking and `BlockReverted` events,
-which remain planned.
+A shallow fork is ordered deterministically:
+
+```text
+retained: A -> B -> C
+RPC now:  A -> X -> Y
+events:   Reverted(C) -> Reverted(B) -> Applied(X) -> Applied(Y)
+```
 
 ### Runtime topology
 
@@ -175,7 +205,8 @@ which remain planned.
 flowchart LR
     chain["EVM JSON-RPC"] --> source["Alloy-backed RPC adapter"]
     source --> sourceQueue["Bounded source channel"]
-    sourceQueue --> runtime["Runtime validation"]
+    sourceQueue --> gate["CLI reliability gate"]
+    gate --> runtime["Runtime validation"]
     runtime --> dispatcher["Non-blocking Dispatcher"]
 
     dispatcher -->|"try_send"| mailboxA["Plugin A mailbox"]
@@ -190,7 +221,8 @@ flowchart LR
     workerB --> outcomeBus
     workerC --> outcomeBus
 
-    outcomeBus --> cli["CLI logger"]
+    outcomeBus --> gate
+    gate --> checkpoint["Atomic per-chain checkpoint"]
     outcomeBus --> observer["Runtime subscribers"]
 ```
 
@@ -286,6 +318,8 @@ operation:
 - `Failed(PluginError)`: the handler returned `Err`; the worker continues with
   its next event.
 - `Panicked(String)`: Raven caught a handler panic and quarantined that worker.
+- `TimedOut(Duration)`: the handler exceeded its deadline and Raven quarantined
+  that worker because cancelling a mutable handler may leave uncertain state.
 - `Rejected(WorkerStopped)`: the event was already queued behind the event that
   panicked and could no longer run.
 
@@ -297,6 +331,73 @@ The outcome channel is a live Tokio broadcast channel. A slow subscriber gets
 `RecvError::Lagged` instead of backpressuring workers. Subscribe before
 dispatching if all live outcomes matter. This channel is observability, not a
 durable result store.
+
+## At-least-once delivery and checkpoints
+
+The reusable runtime stays non-blocking; the standalone CLI adds a reliability
+gate around it. For each source event, the CLI dispatches once and observes the
+correlated outcomes. It writes a checkpoint only when every registered plugin
+returns `Succeeded`.
+
+```mermaid
+sequenceDiagram
+    participant Source
+    participant CLI as Reliability gate
+    participant Runtime
+    participant Fast as Fast plugin
+    participant Slow as Slow plugin
+    participant Disk as Checkpoint file
+
+    Source->>CLI: event E
+    CLI->>Runtime: process(E)
+    Runtime-->>CLI: immediate delivery receipt
+    Runtime->>Fast: queued E
+    Runtime->>Slow: queued E
+    Fast-->>CLI: Succeeded (immediately visible)
+    Slow-->>CLI: Succeeded (later)
+    CLI->>Disk: atomic write + fsync + rename
+    CLI-->>Source: receive next event
+```
+
+If a plugin fails, panics, times out, rejects delivery, or the outcome observer
+lags, the checkpoint does not advance. The failure is logged as soon as its
+outcome arrives. Raven then begins graceful shutdown; other already-running
+plugins are neither cancelled nor hidden, and cleanup waits for their bounded
+hooks. On restart, the unacknowledged event is delivered again. This is
+**at-least-once**, not exactly-once, so plugins that persist state or send
+external effects must use an idempotency key such as
+`(chain_id, block_hash, event_kind)`.
+
+Checkpoint ownership deliberately belongs to the composition layer, not an
+individual plugin or RPC adapter:
+
+```text
+source cursor (optimistic, in memory)
+        -> runtime delivery and independent plugin execution
+        -> CLI success gate
+        -> durable checkpoint (acknowledged by every plugin)
+```
+
+The checkpoint is stored as versioned JSON under Raven's config directory at
+`checkpoints/<chain-id>.json`. It contains the bounded canonical `BlockEvent`
+window, not merely a height, so resume can verify hashes and detect a shallow
+fork. Writes use a temporary file, file sync, atomic rename, and directory sync
+on Unix. A crash after plugin success but before durable rename causes safe
+replay; a checkpoint is never moved ahead of plugin success.
+
+`raven run --start resume` is the default. It resumes after the stored tip, or
+starts at the current head when no checkpoint exists. `--start latest` ignores
+an existing checkpoint and begins at the current head; `--start <BLOCK>` starts
+at that height inclusively. Explicit starts replace the old durable position
+only after their first event succeeds.
+
+<Note>
+The CLI intentionally processes one checkpoint unit at a time. Plugins still
+run concurrently for that event and publish outcomes independently, but the
+CLI does not dispatch the next chain event until the current event has fully
+succeeded. Direct `raven-runtime` callers may pipeline dispatches if they own a
+different durability contract.
+</Note>
 
 ## Low-level design
 
@@ -318,8 +419,8 @@ flowchart TD
 | --- | --- | --- |
 | `Runtime` | `Dispatcher`, `PluginContext`, lifecycle state | Public orchestration boundary |
 | `PluginRegistry` | Unique-name `Vec<Box<dyn Plugin>>` before startup | Reject duplicate identities |
-| `Dispatcher` | Worker handles, capacities, next dispatch ID, outcome sender | Non-blocking fan-out and worker supervision |
-| `PluginWorkerHandle` | Metadata, optional mailbox sender, `JoinHandle` | Control one independent worker |
+| `Dispatcher` | Worker handles, capacities, lifecycle deadlines, next dispatch ID, outcome sender | Non-blocking fan-out and worker supervision |
+| `PluginWorkerHandle` | Metadata, mailbox sender, `JoinHandle`, atomic health state | Control and inspect one independent worker |
 | `QueuedPluginEvent` | `DispatchId` and `Arc<ChainEvent>` | Cheap fan-out without cloning event payloads |
 | `PluginOutcome` | Correlation, plugin, event, status, duration | Independent execution report |
 
@@ -349,19 +450,20 @@ fail-fast.
 
 ```text
 worker(plugin, mailbox):
-    await plugin.start(context)
+    await-with-timeout plugin.start(context)
     publish readiness to Runtime::start
 
     while queued event exists:
-        await plugin.handle_event(event, context)
+        await-with-timeout plugin.handle_event(event, context)
         publish that result immediately
 
-        if handler panicked:
+        if handler panicked or timed out:
             close this mailbox
             reject already queued events as WorkerStopped
             stop this worker only
 
-    await plugin.shutdown(context)
+    await-with-timeout plugin.shutdown(context)
+    publish health transition
 ```
 
 ### Ordering and concurrency matrix
@@ -409,6 +511,11 @@ outcomes: B:E1, B:E2, B:E3, A:E1, A:E2, A:E3
 Plugin B may therefore finish E2 or E3 while Plugin A is still handling E1.
 Plugin B only waits for its own previous event, never for Plugin A.
 
+That example describes callers which pipeline multiple `Runtime::process`
+calls. The standalone CLI's checkpoint gate dispatches E2 only after every
+plugin succeeds on E1. Within E1, however, B's outcome is still published as
+soon as B completes; it never waits to report behind A.
+
 The FIFO guarantee applies to events that the mailbox accepted. An event
 rejected with `MailboxFull` never entered that plugin's queue, so it cannot be
 part of that plugin's processed sequence. If a worker panics, its queued events
@@ -434,9 +541,9 @@ Other plugins continue accepting and processing the same event.
 ```
 
 A bounded queue prevents one unhealthy plugin from consuming unbounded memory.
-Non-blocking dispatch means Raven cannot also guarantee that every overloaded
-mailbox accepts every event. Durable at-least-once delivery requires a replay
-log/checkpoint design and remains roadmap work.
+Non-blocking runtime dispatch means a pipelining caller cannot also guarantee
+that every overloaded mailbox accepts every event. The standalone CLI treats
+any rejection as a failed checkpoint unit and replays it on restart.
 
 ## Lifecycle barriers
 
@@ -451,9 +558,19 @@ intentional barriers:
   stream independently.
 - **Shutdown:** Raven drops all mailbox senders first. Workers concurrently
   drain already accepted FIFO events and call `shutdown`. `Runtime::shutdown`
-  waits for every worker so resources are not abandoned.
+  waits for every worker so resources are not abandoned. It aggregates all
+  lifecycle errors after every join instead of returning only the first.
 
-Startup/shutdown timeouts and worker restart policy are not implemented yet.
+`PluginTimeouts` defaults to 30 seconds for startup, 60 seconds per handler,
+and 30 seconds for shutdown. `Runtime::with_plugin_timeouts` overrides all
+three with positive durations. `Runtime::plugin_health` returns `Starting`,
+`Healthy`, `Quarantined`, or `Stopped` snapshots.
+
+There is deliberately no automatic in-process restart. A normal handler
+`PluginError` is recoverable and the worker continues. A panic or timeout
+quarantines the worker because its mutable state may be inconsistent. In the
+CLI, that makes the checkpoint unit fail and process restart replays from the
+last durable boundary with a fresh plugin instance.
 
 ## Failure isolation
 
@@ -461,10 +578,11 @@ Startup/shutdown timeouts and worker restart policy are not implemented yet.
 | --- | --- | --- | --- |
 | Handler returns `Err` | One plugin and one event | Continue normally | Emits `Failed`, then continues |
 | Handler panics | One plugin worker | Continue normally | Emits `Panicked`, closes mailbox, rejects queued work, then shuts down |
+| Handler times out | One plugin worker | Continue normally | Emits `TimedOut`, is quarantined, rejects queued work, then runs bounded shutdown |
 | Mailbox is full | One plugin delivery | Other mailboxes are still attempted | Emits `Rejected(MailboxFull)` |
 | Outcome subscriber lags | One subscriber | Workers never wait | Subscriber receives `Lagged` |
 | Startup fails | Global readiness barrier | Started siblings are cleaned up | Runtime does not enter `Started` |
-| Shutdown fails | Global shutdown result | Every worker is still joined | Runtime enters `Shutdown` and returns an error |
+| Shutdown fails or times out | Global shutdown result | Every worker is still joined | Runtime enters `Shutdown` and returns one or an aggregate error |
 
 Handler errors are expected operational results. Panics indicate broken plugin
 invariants, so continuing with possibly corrupted plugin state would be unsafe.
@@ -478,11 +596,15 @@ Raven currently guarantees:
 - Per-plugin FIFO processing with no overlapping mutable handler calls.
 - Immediate delivery receipts and independently timed live outcomes.
 - Graceful shutdown drains accepted events before plugin cleanup.
+- Bounded startup, handler, and shutdown hooks with worker health snapshots.
+- Capped retry for transient RPC failures and deterministic shallow-reorg order.
+- CLI-owned at-least-once resume after the last all-plugin success checkpoint.
 
 Raven does not yet guarantee:
 
-- Durable delivery across process crashes or subscriber lag.
-- Automatic retries, worker restarts, handler timeouts, or dead-letter queues.
+- Exactly-once external effects; plugins must be idempotent under replay.
+- Automatic plugin-worker restart or dead-letter queues.
+- Recovery from reorgs deeper than the configured canonical window.
 - A deterministic completion order across plugins.
 - CPU parallelism for blocking work performed directly inside async handlers.
 

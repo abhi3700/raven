@@ -15,4 +15,6 @@
 /rustfmt.toml
 /doc.sh
 /LICENSE
+/res/
 /README.md
+/context.md

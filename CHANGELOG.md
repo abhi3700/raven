@@ -7,8 +7,8 @@ groupings are normalized to UTC, and the newest week appears first.
 Only committed work is included. Exact commit titles and links are retained
 under each active week so every summary can be traced back to Git history. This
 snapshot covers the repository from its inception through commit
-[`298cc6a`](https://github.com/abhi3700/raven/commit/298cc6ae3cdddff2d04a17774c63dd4c2e931e4d)
-on August 24, 2026 (UTC).
+[`12ad8b7`](https://github.com/abhi3700/raven/commit/12ad8b7f72812d639db08df8c826c1cbc10b9821)
+on August 25, 2026 (UTC).
 
 ## 2026-W35 (August 24-30, 2026)
 
@@ -35,17 +35,25 @@ on August 24, 2026 (UTC).
   per-plugin ordering, backpressure, error isolation, and transport behavior.
 - Refined CLI output and adopted the caption "A programmable blockchain event
   runtime powered by plugins."
+- Removed the implementation-specific `--source` option and documented the
+  standalone RPC versus embedded Reth deployment boundary.
+- Added colored command output and type-aware ANSI coloring for structured log
+  values, with plain output when color is disabled.
+- Normalized this changelog's commit timestamps and week grouping to UTC.
 - Hardened normalized-event validation, Alloy conversion, polling validation,
   and runtime outcome logging and tests.
 
 <details>
-<summary>Commits (5)</summary>
+<summary>Commits (8)</summary>
 
 - [`c20b00d`](https://github.com/abhi3700/raven/commit/c20b00d4ec3ca98c0542e6907ac382c62fb17338) - feat: add isolated concurrent plugin workers
 - [`d6d1c6f`](https://github.com/abhi3700/raven/commit/d6d1c6ff4bb62bf7d13a3b108ac5b424f8dd737f) - support ws rpc url; replace caption for raven
 - [`b0da527`](https://github.com/abhi3700/raven/commit/b0da527aa8ae73359aa1aad35e6901ffca9c2e49) - make websocket connect via eth_subscribe + reconciliation instead of polling like in http
 - [`b9bbfb4`](https://github.com/abhi3700/raven/commit/b9bbfb4477e55952e852811ff9ff5b049f2ff882) - add config command to set rpc-url to a file, get config, clear config
 - [`298cc6a`](https://github.com/abhi3700/raven/commit/298cc6ae3cdddff2d04a17774c63dd4c2e931e4d) - Implemented chain-agnostic EVM support.
+- [`aa910ec`](https://github.com/abhi3700/raven/commit/aa910ec47e2fb40559cdfd898502f4ce9da83291) - add changelog as per UTC
+- [`5da124c`](https://github.com/abhi3700/raven/commit/5da124c6f4dc29b944fda974ece392853cd2b3bc) - removed --source flag altogether in CLI
+- [`12ad8b7`](https://github.com/abhi3700/raven/commit/12ad8b7f72812d639db08df8c826c1cbc10b9821) - add colors to CLI
 
 </details>
 

@@ -1,0 +1,481 @@
+---
+title: "Runtime reference"
+description: "A single-page guide to raven-runtime: lifecycle, dispatcher, workers, receipts, outcomes, health, and failure isolation."
+---
+
+`raven-runtime` is Raven's asynchronous plugin execution layer. It owns plugin
+registration, lifecycle, worker supervision, event fan-out, delivery receipts,
+live outcomes, health snapshots, and chain validation.
+
+In one sentence: `raven-runtime` is a bounded, actor-like, failure-isolated
+plugin engine where every plugin owns one Tokio worker and one FIFO mailbox.
+
+## Architecture at a glance
+
+```text
+                         raven-runtime
+                              |
+                              v
+                         Runtime facade
+                              |
+                              v
+                         Dispatcher
+                +-------------+-------------+
+                |             |             |
+                v             v             v
+          Plugin A worker Plugin B worker Plugin C worker
+                |             |             |
+                v             v             v
+          handle_event   handle_event   handle_event
+
+Across plugins: concurrent.
+Inside one plugin: sequential FIFO.
+```
+
+The crate is split into small modules:
+
+| Module          | Role                                                         |
+| --------------- | ------------------------------------------------------------ |
+| `runtime.rs`    | Public lifecycle facade: register, start, process, shutdown  |
+| `registry.rs`   | Pre-start ownership of unique plugin values                  |
+| `dispatcher.rs` | Worker spawning, non-blocking fan-out, supervision, outcomes |
+| `dispatch.rs`   | Public receipt, outcome, delivery, and health data types     |
+| `error.rs`      | Runtime failure vocabulary                                   |
+| `lib.rs`        | Public API re-exports                                        |
+
+`Dispatcher` and `PluginRegistry` are intentionally private. Consumers use
+`Runtime`.
+
+## Public API
+
+The common flow is:
+
+```rust
+use raven_core::{ChainEvent, ChainId};
+use raven_runtime::Runtime;
+
+async fn run(
+    event: ChainEvent,
+    plugin: impl raven_plugin_sdk::Plugin + 'static,
+) -> eyre::Result<()> {
+    let chain_id = ChainId::new(8_453)?;
+    let mut runtime = Runtime::new(chain_id);
+
+    runtime.register_plugin(plugin)?;
+    let mut outcomes = runtime.subscribe_outcomes();
+
+    runtime.start().await?;
+    let receipt = runtime.process(event).await?;
+
+    while let Ok(outcome) = outcomes.recv().await {
+        println!("{:?}", outcome.status());
+    }
+
+    runtime.shutdown().await?;
+    Ok(())
+}
+```
+
+Important exports:
+
+| Type              | Meaning                                  |
+| ----------------- | ---------------------------------------- |
+| `Runtime`         | Public entry point for plugin execution  |
+| `PluginTimeouts`  | Startup, handler, and shutdown deadlines |
+| `DispatchId`      | Correlation ID for one fan-out attempt   |
+| `DispatchReceipt` | Immediate mailbox delivery report        |
+| `PluginDelivery`  | One plugin's delivery result             |
+| `PluginOutcome`   | One plugin's later execution result      |
+| `PluginHealth`    | Point-in-time worker health snapshot     |
+| `RuntimeError`    | Runtime operation error                  |
+
+## Runtime and dispatcher split
+
+`Runtime` is the policy boundary:
+
+```text
+Runtime
+  |
+  +-- owns chain-scoped PluginContext
+  +-- enforces lifecycle state
+  +-- rejects events from a different chain
+  +-- exposes the public API
+```
+
+`Dispatcher` is the execution mechanism:
+
+```text
+Dispatcher
+  |
+  +-- starts workers
+  +-- owns mailbox senders
+  +-- assigns DispatchId values
+  +-- performs non-blocking try_send fan-out
+  +-- publishes live PluginOutcome values
+  +-- joins workers during shutdown
+```
+
+This separation keeps user-facing lifecycle checks outside the low-level Tokio
+machinery.
+
+## Runtime lifecycle
+
+`Runtime` has three states:
+
+```text
+new()
+  |
+  v
+Created --register_plugin(...)--> Created
+  |
+  | start()
+  v
+Started --process(event)--------> Started
+  |
+  | shutdown()
+  v
+Shutdown
+```
+
+Valid operations:
+
+| State      | Allowed                                                      | Rejected                                          |
+| ---------- | ------------------------------------------------------------ | ------------------------------------------------- |
+| `Created`  | `register_plugin`, `with_plugin_timeouts`, `start`           | `process`, `shutdown`                             |
+| `Started`  | `process`, `subscribe_outcomes`, `plugin_health`, `shutdown` | `register_plugin`, `start`                        |
+| `Shutdown` | inspection helpers                                           | `start`, `process`, `shutdown`, `register_plugin` |
+
+If startup fails after plugins have moved into workers, the runtime transitions
+to `Shutdown`. Returning to `Created` would imply the original plugin values are
+still safely available, which is not true after partial lifecycle execution.
+
+## One chain per runtime
+
+The runtime is bound to one non-zero EIP-155 chain ID through `PluginContext`.
+Every event passed to `Runtime::process` must match that chain:
+
+```text
+Runtime(chain = 8453)
+  |
+  +-- ChainEvent(chain = 8453) -> accepted for dispatch
+  +-- ChainEvent(chain = 1)    -> RuntimeError::ChainIdMismatch
+```
+
+Multi-chain deployments currently run one runtime per chain/source. This keeps
+plugin state, ordering, and checkpoint ownership simple.
+
+## Registration
+
+Before startup, plugins live in `PluginRegistry`:
+
+```text
+Runtime
+  |
+  v
+Dispatcher
+  |
+  v
+PluginRegistry
+  |
+  +-- Box<dyn Plugin> "whale-detector"
+  +-- Box<dyn Plugin> "transfer-monitor"
+```
+
+Plugin names come from `Plugin::metadata()` and must be unique within one
+runtime. Duplicate names fail with `RuntimeError::DuplicatePlugin`.
+
+During startup, the registry is drained with `take_plugins()`:
+
+```text
+before start: registry owns Plugin A, Plugin B
+after start:  worker A owns Plugin A, worker B owns Plugin B
+```
+
+A plugin is never owned by both the registry and a worker at the same time.
+
+## Worker startup
+
+`Runtime::start` spawns every worker before waiting for readiness:
+
+```text
+Runtime::start
+  |
+  +-- spawn worker A -> Plugin::start
+  +-- spawn worker B -> Plugin::start
+  +-- spawn worker C -> Plugin::start
+  |
+  +-- wait for A/B/C readiness oneshots
+```
+
+Startup is concurrent, but it is still an all-or-nothing barrier. The runtime
+enters `Started` only after every registered plugin reports successful startup.
+If any plugin start hook returns an error, panics, or times out, Raven closes all
+worker mailboxes, waits for cleanup, and returns an error.
+
+## PluginTimeouts
+
+Every lifecycle hook is bounded:
+
+```text
+PluginTimeouts
+  |
+  +-- startup  -> Plugin::start
+  +-- handler  -> Plugin::handle_event
+  +-- shutdown -> Plugin::shutdown
+```
+
+Defaults:
+
+| Hook           | Default    |
+| -------------- | ---------- |
+| `start`        | 30 seconds |
+| `handle_event` | 60 seconds |
+| `shutdown`     | 30 seconds |
+
+Use `Runtime::with_plugin_timeouts` before startup. All durations must be
+positive. A timeout during startup fails the runtime start. A timeout during
+event handling quarantines that worker. A timeout during shutdown is returned as
+a lifecycle cleanup error after Raven still joins every worker it can.
+
+## Dispatch receipt
+
+`Runtime::process` validates lifecycle state and chain ID, then asks the
+dispatcher to fan out the event. The dispatcher does not await plugin handlers.
+
+```text
+Runtime::process(event)
+  |
+  +-- validate state
+  +-- validate event chain ID
+  +-- Dispatcher::dispatch(event)
+        |
+        +-- assign DispatchId
+        +-- wrap event in Arc
+        +-- try_send to each plugin mailbox
+        +-- return DispatchReceipt
+```
+
+`DispatchReceipt` is immediate. It answers: "Did each mailbox accept this
+event?"
+
+```text
+DispatchReceipt
+  |
+  +-- dispatch_id = 42
+  +-- whale-detector    -> Accepted
+  +-- transfer-monitor  -> Accepted
+  +-- slow-plugin       -> Rejected(MailboxFull)
+```
+
+It does not mean the plugins finished processing.
+
+## Outcome stream
+
+Accepted events are processed later by each worker. Subscribers observe results
+through a Tokio broadcast channel:
+
+```text
+worker A --+
+worker B --+--> broadcast<Arc<PluginOutcome>> --> CLI
+worker C --+                                  --> metrics
+                                             --> logs
+```
+
+`PluginOutcome` answers: "What happened when this plugin handled that dispatch?"
+
+| Outcome status            | Meaning                                                   | Worker continues?         |
+| ------------------------- | --------------------------------------------------------- | ------------------------- |
+| `Succeeded`               | Handler returned `Ok(())`                                 | Yes                       |
+| `Failed(PluginError)`     | Handler returned a normal error                           | Yes                       |
+| `Panicked(String)`        | Handler panicked                                          | No, worker is quarantined |
+| `TimedOut(Duration)`      | Handler exceeded the deadline                             | No, worker is quarantined |
+| `Rejected(MailboxFull)`   | Dispatcher could not enqueue the event                    | Not processed             |
+| `Rejected(WorkerStopped)` | Worker was already stopped or died before queued work ran | Not processed             |
+
+Receipt and outcome are different stages:
+
+```text
+t=0ms   process(event) -> DispatchReceipt(Accepted, Accepted)
+t=4ms   fast plugin    -> PluginOutcome(Succeeded)
+t=80ms  slow plugin    -> PluginOutcome(Failed(...))
+```
+
+The outcome channel is live observability, not durable storage. A slow
+subscriber receives `broadcast::error::RecvError::Lagged`; it does not
+backpressure plugin workers.
+
+## Why each plugin has its own mailbox
+
+Raven fans the same logical event to every plugin:
+
+```text
+                         ChainEvent
+                             |
+                             v
+                         Dispatcher
+              +--------------+--------------+
+              |              |              |
+              v              v              v
+        mailbox A      mailbox B      mailbox C
+              |              |              |
+              v              v              v
+        worker A       worker B       worker C
+```
+
+Each mailbox is a bounded Tokio `mpsc` channel. This gives two properties:
+
+- Inside one plugin, events are FIFO and never overlap against `&mut self`.
+- Across plugins, workers execute independently.
+
+Raven uses `Arc<ChainEvent>` for fan-out so each mailbox receives cheap shared
+ownership instead of deeply cloning the event payload.
+
+## Backpressure behavior
+
+Dispatcher fan-out uses `try_send`, not `send(...).await`.
+
+```text
+event
+  |
+  +-- fast mailbox -> Accepted
+  +-- slow mailbox -> Rejected(MailboxFull)
+  +-- idle mailbox -> Accepted
+```
+
+A full mailbox affects only that plugin. Raven still attempts every sibling
+mailbox and returns the complete delivery receipt.
+
+The standalone CLI treats any rejected delivery as a failed checkpoint unit and
+replays the event after restart. Direct `raven-runtime` callers may choose their
+own durability policy.
+
+## Worker health
+
+Internal worker health is stored as an `Arc<AtomicU8>` so the worker task can
+write state while the dispatcher reads snapshots:
+
+```text
+             Arc<AtomicU8>
+              ^        ^
+              |        |
+       Dispatcher    worker task
+          reads        writes
+```
+
+Public snapshots use `PluginHealthStatus`:
+
+```text
+Starting -> Healthy -> Stopped
+      \        |
+       \       +-- panic or timeout
+        \          |
+         +-------> Quarantined
+```
+
+`Runtime::plugin_health()` returns a point-in-time vector. It is not a stream.
+
+## Panic and timeout quarantine
+
+A returned `PluginError` is an event-level failure; the worker continues. A
+panic or handler timeout is a worker-level failure; Raven quarantines only that
+worker:
+
+```text
+handler panics or times out
+  |
+  +-- mark worker Quarantined
+  +-- close that mailbox
+  +-- publish Panicked or TimedOut for current event
+  +-- reject already queued events as WorkerStopped
+  +-- run bounded shutdown
+```
+
+Sibling workers are not cancelled. Raven intentionally does not restart the
+plugin in-process, because the plugin's mutable state may be inconsistent after
+a panic or cancelled handler. The CLI recovery path is process restart plus
+checkpoint replay with fresh plugin instances.
+
+## Graceful shutdown
+
+`Runtime::shutdown` asks the dispatcher to close every mailbox and join every
+worker:
+
+```text
+drop all mailbox senders
+  |
+  +-- worker A drains accepted queue -> shutdown A
+  +-- worker B drains accepted queue -> shutdown B
+  +-- worker C drains accepted queue -> shutdown C
+  |
+  v
+join all worker tasks
+```
+
+Dropping the sender is the shutdown signal. Each worker processes already
+accepted FIFO events before `Plugin::shutdown` runs. Raven closes all senders
+before awaiting any `JoinHandle`, so workers can drain and shut down
+concurrently.
+
+Shutdown errors are aggregated. One failed or timed-out shutdown hook does not
+prevent Raven from waiting for sibling cleanup.
+
+## Error groups
+
+`RuntimeError` can be read in groups:
+
+| Group                    | Variants                                                                                                      |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| Configuration            | `InvalidPluginMailboxCapacity`, `InvalidPluginTimeout`                                                        |
+| Lifecycle misuse         | `TimeoutConfigurationAfterStart`, `RegistrationAfterStart`, `AlreadyStarted`, `NotStarted`, `AlreadyShutdown` |
+| Plugin identity          | `DuplicatePlugin`                                                                                             |
+| Event validity           | `ChainIdMismatch`                                                                                             |
+| Runtime infrastructure   | `DispatchIdExhausted`, `PluginWorkerStopped`, `PluginTimeout`, `MultipleLifecycleFailures`                    |
+| Plugin lifecycle failure | `PluginOperation`                                                                                             |
+
+During `handle_event`, a plugin error becomes `PluginOutcomeStatus::Failed`.
+During `start` or `shutdown`, a plugin error becomes `RuntimeError` because the
+runtime lifecycle operation itself failed.
+
+## Runtime guarantees
+
+Raven runtime guarantees:
+
+- One independent worker per plugin.
+- One bounded FIFO mailbox per plugin.
+- No overlapping mutable handler calls inside one plugin.
+- Non-blocking fan-out to every active plugin.
+- Immediate delivery receipts.
+- Live outcomes in actual completion order.
+- Normal handler errors do not kill workers.
+- Handler panic or timeout quarantines only that worker.
+- Queued events behind a quarantined handler are explicitly accounted for.
+- Startup and shutdown are concurrent lifecycle barriers.
+- Lifecycle hooks are bounded by `PluginTimeouts`.
+- Worker health is inspectable through snapshots.
+
+Raven runtime does not guarantee:
+
+- Exactly-once external effects.
+- Durable outcome storage.
+- Automatic plugin restart.
+- Dead-letter queues.
+- Deterministic completion order across plugins.
+- CPU parallelism for blocking work inside async handlers.
+
+## Reading order
+
+For a line-by-line code review, read the crate in this order:
+
+```text
+runtime.rs
+  -> registry.rs
+  -> dispatch.rs
+  -> dispatcher.rs::start
+  -> dispatcher.rs::dispatch
+  -> run_plugin_worker
+  -> stop_plugin_workers
+  -> tests
+```
+
+That path starts with the public lifecycle policy before entering the lower-level
+async machinery.

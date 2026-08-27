@@ -78,7 +78,7 @@ fn config_file_path() -> Result<PathBuf> {
 	Ok(config_directory()?.join(CONFIG_FILE_NAME))
 }
 
-fn config_directory() -> Result<PathBuf> {
+pub(crate) fn config_directory() -> Result<PathBuf> {
 	if let Some(directory) = non_empty_env_path("RAVEN_CONFIG_DIR") {
 		return Ok(directory);
 	}

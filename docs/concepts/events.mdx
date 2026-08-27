@@ -60,10 +60,9 @@ if event.is_applied() {
 }
 ```
 
-<Note>
-The model supports reverted blocks, but the RPC source currently emits only
-`BlockApplied`. Reorg detection is on the roadmap.
-</Note>
+The RPC source emits `BlockReverted` for retained blocks displaced by a shallow
+fork, from old tip down to the common ancestor, before it emits replacement
+`BlockApplied` values. Forks deeper than the configured window are terminal.
 
 ## Event boundary
 
@@ -71,9 +70,9 @@ The model supports reverted blocks, but the RPC source currently emits only
 flowchart LR
     native[Source-native block] -->|adapter conversion| block[Validated BlockEvent]
     block --> applied[ChainEvent BlockApplied]
-    block -. reorg support planned .-> reverted[ChainEvent BlockReverted]
+    block -->|shallow reorg correction| reverted[ChainEvent BlockReverted]
     applied --> runtime[Raven Runtime]
-    reverted -. planned source output .-> runtime
+    reverted --> runtime
 ```
 
 Transactions, logs, transfers, swaps, and other domain events are possible

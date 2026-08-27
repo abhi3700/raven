@@ -56,8 +56,8 @@ flowchart LR
     rpc[EVM RPC endpoint] --> chainId[eth_chainId]
     chainId --> validate[Validate non-zero EIP-155 ID]
     validate --> event[Tag every ChainEvent]
-    event --> first[First event initializes Runtime]
-    first --> context[PluginContext carries detected ID]
+    event --> inspect[CLI selects per-chain checkpoint]
+    inspect --> context[Runtime and PluginContext use detected ID]
 ```
 
 `ChainId` accepts every non-zero `u64`; Raven does not compare the discovered
@@ -66,7 +66,7 @@ the baseline RPC block schema used by EVM chains—it does not force chain ID 1.
 An endpoint must provide the standard `eth_chainId`, `eth_blockNumber`, and
 `eth_getBlockByNumber` methods, plus `eth_subscribe` when using WS(S).
 
-## One ordered catch-up path
+## One canonical catch-up path
 
 Both triggers feed the same cursor-based algorithm:
 
@@ -74,16 +74,15 @@ Both triggers feed the same cursor-based algorithm:
 observed target height N
         │
         ▼
-next height > N? ── yes ──► nothing to emit
-        │ no
-        ▼
-fetch next ... N sequentially
+compare bounded retained ancestry with canonical RPC blocks
+        │
+        ├─ fork ─► revert old tip down to common ancestor
         │
         ▼
-normalize and send each block
+fetch every replacement/missing height through N
         │
         ▼
-advance next height to N + 1
+verify parent links, emit Applied, retain bounded ancestry
 ```
 
 A WebSocket header is only a signal that a height is available. Raven does not
@@ -92,21 +91,35 @@ from the cursor through the signalled height using `eth_getBlockByNumber`.
 
 For example, if Raven's next height is 100 and it observes head 103, it emits
 100, 101, 102, and 103 in ascending order. A duplicate or stale notification
-below the cursor does nothing. The same behavior applies when the periodic
-reconciliation discovers a gap.
+below the cursor causes an ancestry check. The same behavior applies when the
+periodic reconciliation discovers a gap.
 
 At startup Raven subscribes before reading the current height, preventing a
 block mined during initialization from falling between those operations. It
-then emits the current head immediately. Alloy reconnects its pub/sub transport
-and restores active subscriptions; Raven's reconciliation closes any height
-gap across that reconnection.
+then emits the configured start position through the current head. Raven owns
+reconnection so the same in-memory cursor/window survives a new provider and
+subscription; reconciliation then closes the gap.
 
 <Note>
-    Ordered catch-up prevents missing intermediate heights, but it is not reorg
-    handling. A replacement header at an already-emitted height is currently
-    ignored by the monotonic cursor. Canonical ancestry tracking and
-    `BlockReverted` emission remain planned.
+    A shallow fork emits old blocks in descending `BlockReverted` order, then
+    replacement blocks in ascending `BlockApplied` order. A fork with no common
+    ancestor in the retained window is terminal rather than silently skipping
+    a correction. The default window is 64 blocks.
 </Note>
+
+## Start positions and durable resume
+
+`SourceStart` supports:
+
+- `Latest`: emit the current head and follow it.
+- `Block(N)`: emit block `N` inclusively and catch up.
+- `Resume(blocks)`: verify a contiguous, parent-linked durable ancestry window
+  and continue after its tip.
+
+The source's cursor is optimistic in-memory state. The `raven` CLI owns the
+durable checkpoint and advances it only after all plugins succeed. This split
+means a crash can replay an event but cannot silently acknowledge one that a
+plugin did not finish.
 
 ## Configure the source in Rust
 
@@ -115,13 +128,15 @@ HTTP example:
 ```rust
 use std::time::Duration;
 
-use raven_source_alloy::AlloySource;
+use raven_source_alloy::{AlloySource, SourceStart};
 use tokio::sync::mpsc;
 
 let (sender, mut receiver) = mpsc::channel(256);
 
 let source = AlloySource::new("http://localhost:8545")
-    .with_poll_interval(Duration::from_secs(1));
+    .with_poll_interval(Duration::from_secs(1))
+    .with_start(SourceStart::Block(20_000_000))
+    .with_reorg_depth(64);
 
 tokio::spawn(async move {
     source.run(sender).await
@@ -144,23 +159,31 @@ let source = AlloySource::new("wss://your-evm-rpc.example")
 ```
 
 The default HTTP poll interval is 4 seconds. The default WS reconciliation
-interval is 30 seconds. `AlloySource::run` rejects a zero value for either
-interval before connecting.
+interval is 30 seconds. The default reorg window is 64 blocks. Source
+configuration rejects zero intervals/depth, malformed resume windows, and an
+invalid retry policy before processing events.
 
 ## Failure behavior
 
-`AlloySource::run` stops and returns an error when:
+`AlloySourceError::is_transient` separates retryable transport/state failures
+from terminal contract violations.
 
-- It cannot parse or connect to the RPC endpoint.
-- Chain ID, block-number, or full-block requests fail terminally.
-- WebSocket subscription setup fails or the subscription stream ends.
-- The provider omits a requested block.
-- A block cannot be normalized.
-- The event receiver is dropped.
+Transient failures include connection/request/subscription errors, a closed
+subscription, a temporarily omitted block, and the chain changing during a
+multi-block reconciliation. Raven reconnects with exponential backoff starting
+at 500 ms, capped at 30 seconds, with 20% jitter. Every retry logs its attempt,
+delay, and cause.
+
+Terminal failures include an invalid URL/configuration, invalid chain ID,
+resume checkpoint mismatch, block conversion failure, receiver loss, and a
+reorg deeper than retained ancestry. Terminal failures stop the source rather
+than retrying a condition that cannot be repaired by reconnecting.
 
 ## Current limitations
 
-- Historical blocks before the startup height are not backfilled.
-- Reorganizations are not detected and `BlockReverted` is not emitted.
-- Raven-level retry classification, jitter, checkpoints, and durable resume are
-  not yet implemented.
+- Reorg recovery is intentionally bounded; deep forks require operator action
+  and a deliberate new start position.
+- The source does not persist state by itself. Embedders other than the Raven
+  CLI must own their acknowledgement/checkpoint contract.
+- JSON-RPC providers may differ in retention and EVM compatibility, so explicit
+  historical starts can fail when the endpoint has pruned the requested data.

@@ -1,9 +1,40 @@
-use std::{sync::Arc, time::Duration};
+//! Public vocabulary for event delivery, execution outcomes, and worker health.
+//!
+//! Runtime processing has two observable stages:
+//!
+//! ```text
+//! Runtime::process(event)
+//!        |
+//!        v
+//! DispatchReceipt
+//!   immediate delivery report:
+//!   did each mailbox accept the event?
+//!
+//! Plugin workers later emit:
+//!
+//! PluginOutcome
+//!   asynchronous execution report:
+//!   what happened inside one plugin handler?
+//! ```
+//!
+//! A shared `DispatchId` ties both stages together. Rejected deliveries are
+//! represented in both places: the receipt lets the caller react immediately,
+//! and a zero-duration rejected outcome keeps outcome subscribers' accounting
+//! complete.
 
 use raven_core::ChainEvent;
 use raven_plugin_sdk::PluginError;
+use std::{sync::Arc, time::Duration};
 
 /// Monotonically increasing identifier assigned to one runtime dispatch.
+///
+/// One call to `Runtime::process` gets one ID, and every plugin delivery/outcome
+/// related to that fan-out carries the same value.
+///
+/// ```text
+/// process(E1) -> DispatchId(1) -> outcomes from all plugins for E1
+/// process(E2) -> DispatchId(2) -> outcomes from all plugins for E2
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DispatchId(u64);
 
@@ -19,6 +50,9 @@ impl DispatchId {
 }
 
 /// Reason an event could not be enqueued for one plugin.
+///
+/// Rejections are per-plugin. A full or stopped worker does not prevent the
+/// dispatcher from attempting sibling plugin mailboxes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PluginDeliveryFailure {
 	/// The plugin's bounded mailbox had no remaining capacity.
@@ -29,6 +63,14 @@ pub enum PluginDeliveryFailure {
 }
 
 /// Result of attempting to enqueue an event for one plugin.
+///
+/// This is a mailbox result, not a handler result.
+///
+/// ```text
+/// Accepted  -> worker will later emit Succeeded, Failed, Panicked, TimedOut,
+///              or Rejected(WorkerStopped) if it dies before queued work runs
+/// Rejected  -> event never entered that plugin mailbox
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PluginDeliveryStatus {
 	/// The event was accepted by the plugin's mailbox.
@@ -39,6 +81,12 @@ pub enum PluginDeliveryStatus {
 }
 
 /// Per-plugin delivery result returned immediately by the dispatcher.
+///
+/// ```text
+/// PluginDelivery
+///   plugin = "block-logger"
+///   status = Accepted | Rejected(...)
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PluginDelivery {
 	plugin: &'static str,
@@ -67,6 +115,17 @@ impl PluginDelivery {
 }
 
 /// Immediate receipt produced after Raven attempts non-blocking fan-out.
+///
+/// A receipt is returned before any plugin handler is awaited.
+///
+/// ```text
+/// DispatchReceipt
+///   |
+///   +-- DispatchId(7)
+///   +-- plugin A: Accepted
+///   +-- plugin B: Rejected(MailboxFull)
+///   +-- plugin C: Accepted
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DispatchReceipt {
 	dispatch_id: DispatchId,
@@ -105,6 +164,20 @@ impl DispatchReceipt {
 }
 
 /// Asynchronous completion status emitted by an independent plugin worker.
+///
+/// Normal handler errors stay at event scope and the worker continues. Panics
+/// and timeouts move the worker to quarantine because the plugin's mutable state
+/// may no longer be safe to reuse.
+///
+/// ```text
+/// handle_event
+///   |
+///   +-- Ok(())      -> Succeeded, continue
+///   +-- Err(_)      -> Failed, continue
+///   +-- panic       -> Panicked, quarantine
+///   +-- timeout     -> TimedOut, quarantine
+///   +-- not queued  -> Rejected
+/// ```
 #[derive(Debug)]
 pub enum PluginOutcomeStatus {
 	/// The plugin handled the event successfully.
@@ -116,11 +189,73 @@ pub enum PluginOutcomeStatus {
 	/// The plugin panicked while handling the event and its worker stopped.
 	Panicked(String),
 
+	/// The handler exceeded its configured deadline and its worker stopped.
+	TimedOut(Duration),
+
 	/// The dispatcher could not enqueue the event for this plugin.
 	Rejected(PluginDeliveryFailure),
 }
 
+/// Current lifecycle state of one independent plugin worker.
+///
+/// ```text
+/// Starting -> Healthy -> Stopped
+///      \        |
+///       \       +-- panic, timeout, or lifecycle failure
+///        \          |
+///         +-------> Quarantined
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PluginHealthStatus {
+	/// The startup hook is still running.
+	Starting,
+	/// The worker is accepting and processing events.
+	Healthy,
+	/// The worker was isolated after a panic, timeout, or lifecycle failure.
+	Quarantined,
+	/// The worker completed its shutdown hook.
+	Stopped,
+}
+
+/// Point-in-time health information for one plugin worker.
+///
+/// This is a snapshot read from the dispatcher's worker handles. It is not a
+/// stream and it does not replace the live outcome broadcast.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PluginHealth {
+	plugin: &'static str,
+	status: PluginHealthStatus,
+}
+
+impl PluginHealth {
+	pub(crate) const fn new(plugin: &'static str, status: PluginHealthStatus) -> Self {
+		Self { plugin, status }
+	}
+
+	/// Returns the plugin metadata name.
+	pub const fn plugin(&self) -> &'static str {
+		self.plugin
+	}
+
+	/// Returns the worker's current lifecycle state.
+	pub const fn status(&self) -> PluginHealthStatus {
+		self.status
+	}
+}
+
 /// One plugin's independently emitted result for one dispatched event.
+///
+/// Outcomes are published over a broadcast channel as each worker finishes. A
+/// slow subscriber can lag without applying backpressure to plugin execution.
+///
+/// ```text
+/// PluginOutcome
+///   dispatch_id -> correlates with DispatchReceipt
+///   plugin      -> which worker handled it
+///   event       -> shared ChainEvent
+///   status      -> execution or rejection result
+///   elapsed     -> handler duration, or zero for delivery rejection
+/// ```
 #[derive(Debug)]
 pub struct PluginOutcome {
 	dispatch_id: DispatchId,

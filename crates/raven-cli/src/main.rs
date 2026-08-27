@@ -1,3 +1,4 @@
+mod checkpoint;
 mod cli;
 mod config;
 mod logging;
@@ -7,7 +8,7 @@ mod runner;
 use std::process::ExitCode;
 
 use clap::{CommandFactory, Parser};
-use cli::{Cli, Command, ConfigCommand, PluginCommand};
+use cli::{Cli, Command, ConfigCommand, DoctorArgs, PluginCommand};
 use eyre::{Result, bail};
 
 #[tokio::main]
@@ -57,8 +58,8 @@ async fn run_cli() -> Result<()> {
 			},
 		},
 
-		Some(Command::Doctor) => {
-			output::print_doctor(env!("CARGO_PKG_VERSION"));
+		Some(Command::Doctor(args)) => {
+			handle_doctor(args).await?;
 		},
 
 		Some(Command::Config { command }) => handle_config_command(command)?,
@@ -71,6 +72,19 @@ async fn run_cli() -> Result<()> {
 		},
 	}
 
+	Ok(())
+}
+
+async fn handle_doctor(args: DoctorArgs) -> Result<()> {
+	let rpc_url = config::resolve_rpc_url(args.rpc_url.as_deref())?;
+	let started = std::time::Instant::now();
+	let endpoint = tokio::time::timeout(
+		std::time::Duration::from_millis(args.timeout_ms),
+		raven_source_alloy::inspect_rpc_endpoint(&rpc_url),
+	)
+	.await
+	.map_err(|_| eyre::eyre!("RPC check timed out after {} ms", args.timeout_ms))??;
+	output::print_doctor(env!("CARGO_PKG_VERSION"), &rpc_url, endpoint, started.elapsed());
 	Ok(())
 }
 

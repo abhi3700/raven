@@ -51,6 +51,9 @@ Public exports:
 - `PluginDeliveryFailure`
 - `PluginOutcome`
 - `PluginOutcomeStatus`
+- `PluginHealth`
+- `PluginHealthStatus`
+- `PluginTimeouts`
 - `DEFAULT_PLUGIN_MAILBOX_CAPACITY`
 - `DEFAULT_OUTCOME_CHANNEL_CAPACITY`
 
@@ -58,6 +61,8 @@ Public exports:
 `Runtime::register_plugin` and lifecycle methods instead of depending on them.
 `Runtime::process` returns non-blocking per-plugin delivery information;
 `Runtime::subscribe_outcomes` exposes independently completed handler results.
+See [Runtime reference](/docs/reference/runtime) for a single-page explanation
+of lifecycle, worker topology, receipts, outcomes, health, and failure isolation.
 
 ## `raven-source-alloy`
 
@@ -66,6 +71,11 @@ Public exports:
 - `AlloySource`
 - `AlloySourceError`
 - `AlloySourceResult`
+- `SourceStart`
+- `RetryPolicy`
+- `RpcTransport`
+- `RpcEndpointInfo`
+- `inspect_rpc_endpoint`
 
 This crate is the implementation behind the CLI's RPC ingestion; operators do
 not select it with a source flag. Alloy block conversion remains private so
@@ -77,9 +87,10 @@ The binary crate owns:
 
 - Command-line parsing.
 - Persistent RPC URL configuration and override resolution.
+- Chain-specific atomic checkpoint persistence and at-least-once success gate.
 - Tracing initialization.
 - Alloy-backed RPC task creation.
-- Runtime initialization from the first discovered event.
+- Endpoint inspection and runtime initialization from the discovered chain ID.
 - Ctrl+C handling and graceful shutdown.
 - The built-in block logger used by `raven run`.
 

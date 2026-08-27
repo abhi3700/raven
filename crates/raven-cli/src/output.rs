@@ -40,9 +40,19 @@ pub(crate) fn print_banner() {
 	println!("{}\n", "RPC ingestion  •  normalized events  •  parallel plugins".dimmed());
 }
 
-pub(crate) fn print_doctor(version: &str) {
+pub(crate) fn print_doctor(
+	version: &str,
+	rpc_url: &str,
+	endpoint: raven_source_alloy::RpcEndpointInfo,
+	elapsed: std::time::Duration,
+) {
 	println!("{} {}", "Raven CLI".bright_blue().bold(), format!("v{version}").bright_cyan());
 	println!("{} {}", "status:".blue().bold(), "✔ ready".bright_green().bold());
+	print_field("rpc_url", &rpc_url.bright_cyan());
+	print_field("transport", &endpoint.transport.to_string().bright_cyan());
+	print_field("chain_id", &endpoint.chain_id.get().to_string().bright_yellow());
+	print_field("latest_block", &endpoint.latest_block.to_string().bright_yellow());
+	print_field("latency_ms", &elapsed.as_millis().to_string().bright_yellow());
 }
 
 pub(crate) fn print_plugins() {

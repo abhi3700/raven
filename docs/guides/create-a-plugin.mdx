@@ -70,9 +70,9 @@ runtime.start().await?;
 ```
 
 The numeric value above is only an SDK example. `raven run` discovers the
-endpoint's chain ID and constructs the runtime from the first event. Plugins
-can read that value from `PluginContext` and should not assume chain ID 1 unless
-they are intentionally chain-specific.
+endpoint's chain ID before ingestion, loads that chain's checkpoint, and
+constructs the runtime. Plugins can read the ID from `PluginContext` and should
+not assume chain ID 1 unless they are intentionally chain-specific.
 
 ## Observe dispatch and execution separately
 

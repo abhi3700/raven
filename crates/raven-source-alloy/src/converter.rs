@@ -1,10 +1,44 @@
-//! convert Alloy block → Raven ChainEvent
+//! Converts Alloy RPC blocks into Raven core events.
+//!
+//! This module answers: "What Raven representation should this Alloy block
+//! become?" It intentionally does not decide whether a block is canonical,
+//! missing, reverted, or part of a reorg. Those ordering decisions live in
+//! `source.rs`.
+//!
+//! ```text
+//! Alloy Block
+//!   - header number
+//!   - header hash
+//!   - parent hash
+//!   - timestamp
+//!   - transactions
+//!        |
+//!        v
+//! BlockEvent::new(...)
+//!   - validates Raven's source-independent block invariants
+//!   - stores only normalized metadata needed by runtime/plugins
+//!        |
+//!        v
+//! ChainEvent::BlockApplied
+//! ```
+//!
+//! Keeping conversion small makes the source boundary clear: Alloy-specific
+//! structures stop here, and the rest of Raven receives `raven_core` types.
 
 use crate::{AlloySourceError, AlloySourceResult};
 use alloy::{consensus::BlockHeader, network::BlockResponse, rpc::types::Block};
 use raven_core::{BlockEvent, ChainEvent, ChainId};
 
 /// Converts an Alloy RPC block into Raven's normalized event model.
+///
+/// The function extracts only the fields Raven core currently needs: chain ID,
+/// block number, block hash, parent hash, timestamp, and transaction count.
+/// `BlockEvent::new` is the validation boundary, so malformed source data is
+/// reported as a block-conversion error before it can reach the runtime.
+///
+/// The returned event is always `ChainEvent::BlockApplied`. Revert events are
+/// created by `source.rs` when reconciliation proves that a previously emitted
+/// block is no longer part of the RPC node's canonical chain.
 pub(crate) fn convert_block(chain_id: ChainId, block: &Block) -> AlloySourceResult<ChainEvent> {
 	let header = block.header();
 	let transaction_count = u64::try_from(block.transactions().len()).map_err(|error| {

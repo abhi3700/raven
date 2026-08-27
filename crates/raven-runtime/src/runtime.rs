@@ -1,8 +1,27 @@
-use std::sync::Arc;
+//! Public runtime facade and lifecycle policy.
+//!
+//! This module owns the API surface most users interact with. It validates
+//! lifecycle state, keeps the runtime bound to one chain, and delegates actual
+//! worker orchestration to `dispatcher.rs`.
+//!
+//! ```text
+//! user code
+//!    |
+//!    v
+//! Runtime
+//!   state: Created | Started | Shutdown
+//!   context: PluginContext(chain_id)
+//!   dispatcher: worker execution engine
+//! ```
+
+use std::{sync::Arc, time::Duration};
 
 use tokio::sync::broadcast;
 
-use crate::{DispatchReceipt, PluginOutcome, RuntimeError, RuntimeResult, dispatcher::Dispatcher};
+use crate::{
+	DispatchReceipt, PluginHealth, PluginOutcome, RuntimeError, RuntimeResult,
+	dispatcher::Dispatcher,
+};
 use raven_core::{ChainEvent, ChainId};
 use raven_plugin_sdk::{Plugin, PluginContext};
 
@@ -12,7 +31,51 @@ pub const DEFAULT_PLUGIN_MAILBOX_CAPACITY: usize = 256;
 /// Default number of live plugin outcomes retained for each subscriber.
 pub const DEFAULT_OUTCOME_CHANNEL_CAPACITY: usize = 1_024;
 
+/// Bounded deadlines for every plugin lifecycle hook.
+///
+/// Every plugin hook runs behind a timeout so one plugin cannot block startup,
+/// event handling, or shutdown forever.
+///
+/// ```text
+/// PluginTimeouts
+///   startup  -> Plugin::start
+///   handler  -> Plugin::handle_event
+///   shutdown -> Plugin::shutdown
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PluginTimeouts {
+	/// Maximum duration of `Plugin::start`.
+	pub startup: Duration,
+	/// Maximum duration of one `Plugin::handle_event` call.
+	pub handler: Duration,
+	/// Maximum duration of `Plugin::shutdown`.
+	pub shutdown: Duration,
+}
+
+impl Default for PluginTimeouts {
+	fn default() -> Self {
+		Self {
+			startup: Duration::from_secs(30),
+			handler: Duration::from_secs(60),
+			shutdown: Duration::from_secs(30),
+		}
+	}
+}
+
 /// Hosts Raven plugins and processes normalized chain events.
+///
+/// `Runtime` is the public policy layer:
+///
+/// ```text
+/// Runtime
+///   |
+///   +-- accepts plugins only before start
+///   +-- starts all workers as one readiness barrier
+///   +-- validates every event belongs to its chain
+///   +-- returns immediate delivery receipts
+///   +-- exposes live outcome subscribers and health snapshots
+///   +-- shuts down all workers as one cleanup barrier
+/// ```
 #[derive(Debug)]
 pub struct Runtime {
 	dispatcher: Dispatcher,
@@ -22,13 +85,19 @@ pub struct Runtime {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RuntimeState {
+	/// Plugins may still be registered and configuration may still change.
 	Created,
+	/// Workers are running and `process` may dispatch events.
 	Started,
+	/// Startup failed or shutdown completed; the runtime is terminal.
 	Shutdown,
 }
 
 impl Runtime {
 	/// Creates a runtime for one EVM chain.
+	///
+	/// The chain ID is copied into every plugin's `PluginContext`, and every
+	/// event passed to `process` must match it.
 	pub fn new(chain_id: ChainId) -> Self {
 		Self::with_capacities(
 			chain_id,
@@ -38,6 +107,14 @@ impl Runtime {
 	}
 
 	/// Creates a runtime with a custom bounded mailbox capacity per plugin.
+	///
+	/// The capacity applies independently to each worker:
+	///
+	/// ```text
+	/// Plugin A mailbox capacity = N
+	/// Plugin B mailbox capacity = N
+	/// Plugin C mailbox capacity = N
+	/// ```
 	pub fn with_plugin_mailbox_capacity(
 		chain_id: ChainId,
 		mailbox_capacity: usize,
@@ -55,15 +132,44 @@ impl Runtime {
 		outcome_capacity: usize,
 	) -> Self {
 		Self {
-			dispatcher: Dispatcher::new(mailbox_capacity, outcome_capacity),
+			dispatcher: Dispatcher::new(
+				mailbox_capacity,
+				outcome_capacity,
+				PluginTimeouts::default(),
+			),
 			context: PluginContext::new(chain_id),
 			state: RuntimeState::Created,
 		}
 	}
 
+	/// Overrides the bounded deadlines used for every plugin lifecycle hook.
+	///
+	/// This must be called before `start` because the dispatcher copies the
+	/// timeout values into each worker environment.
+	pub fn with_plugin_timeouts(mut self, timeouts: PluginTimeouts) -> RuntimeResult<Self> {
+		if self.state != RuntimeState::Created {
+			return Err(RuntimeError::TimeoutConfigurationAfterStart);
+		}
+		if timeouts.startup.is_zero() || timeouts.handler.is_zero() || timeouts.shutdown.is_zero() {
+			return Err(RuntimeError::InvalidPluginTimeout);
+		}
+
+		self.dispatcher.set_timeouts(timeouts);
+		Ok(self)
+	}
+
 	/// Registers a plugin.
 	///
 	/// Plugins must be registered before the runtime starts.
+	///
+	/// ```text
+	/// Created runtime
+	///    |
+	///    +-- register_plugin(A)
+	///    +-- register_plugin(B)
+	///    v
+	/// PluginRegistry owns A and B until start()
+	/// ```
 	pub fn register_plugin<P>(&mut self, plugin: P) -> RuntimeResult<&mut Self>
 	where
 		P: Plugin + 'static,
@@ -78,6 +184,20 @@ impl Runtime {
 	}
 
 	/// Starts all registered plugins.
+	///
+	/// All plugin workers are spawned first, then the runtime waits for every
+	/// startup readiness signal. A single startup failure prevents the runtime
+	/// from entering `Started`.
+	///
+	/// ```text
+	/// Created
+	///   |
+	///   v
+	/// spawn all workers -> wait for all ready
+	///   |
+	///   +-- all ready -> Started
+	///   +-- any error -> cleanup -> Shutdown
+	/// ```
 	pub async fn start(&mut self) -> RuntimeResult {
 		match self.state {
 			RuntimeState::Created => {},
@@ -100,6 +220,18 @@ impl Runtime {
 	}
 
 	/// Processes one normalized chain event.
+	///
+	/// This method validates state and chain ID, then returns after mailbox
+	/// delivery attempts. It does not wait for plugin handlers.
+	///
+	/// ```text
+	/// process(event)
+	///   |
+	///   +-- validate runtime is Started
+	///   +-- validate event.chain_id == runtime.chain_id
+	///   +-- non-blocking dispatch
+	///   +-- return DispatchReceipt
+	/// ```
 	pub async fn process(&mut self, event: ChainEvent) -> RuntimeResult<DispatchReceipt> {
 		match self.state {
 			RuntimeState::Created => {
@@ -117,6 +249,16 @@ impl Runtime {
 	}
 
 	/// Shuts down all registered plugins.
+	///
+	/// Shutdown closes all worker mailboxes, lets workers drain accepted events,
+	/// then waits for every worker task to complete.
+	///
+	/// ```text
+	/// Started
+	///   |
+	///   v
+	/// close mailboxes -> workers drain -> Plugin::shutdown -> Shutdown
+	/// ```
 	pub async fn shutdown(&mut self) -> RuntimeResult {
 		match self.state {
 			RuntimeState::Created => {
@@ -149,6 +291,9 @@ impl Runtime {
 	}
 
 	/// Returns the number of registered plugins.
+	///
+	/// Before startup this counts registry entries. After startup this counts
+	/// worker handles.
 	pub fn plugin_count(&self) -> usize {
 		self.dispatcher.plugin_count()
 	}
@@ -156,6 +301,14 @@ impl Runtime {
 	/// Returns whether no plugins are registered.
 	pub fn has_no_plugins(&self) -> bool {
 		self.dispatcher.is_empty()
+	}
+
+	/// Returns a point-in-time health snapshot for every running worker.
+	///
+	/// A newly created runtime has no worker health because no workers exist until
+	/// startup moves plugins out of the registry.
+	pub fn plugin_health(&self) -> Vec<PluginHealth> {
+		self.dispatcher.plugin_health()
 	}
 
 	/// Returns whether the runtime has started.
@@ -340,6 +493,87 @@ mod tests {
 
 	struct OrderingPlugin {
 		observed: Arc<Mutex<Vec<u64>>>,
+	}
+
+	struct HangingHandlerPlugin;
+	struct HangingStartupPlugin;
+
+	#[async_trait]
+	impl Plugin for HangingStartupPlugin {
+		fn metadata(&self) -> PluginMetadata {
+			PluginMetadata::new("hanging-startup", "0.1.0", "Never finishes startup")
+		}
+
+		async fn start(&mut self, _context: &PluginContext) -> PluginResult {
+			std::future::pending().await
+		}
+
+		async fn handle_event(
+			&mut self,
+			_event: &ChainEvent,
+			_context: &PluginContext,
+		) -> PluginResult {
+			Ok(())
+		}
+	}
+
+	#[async_trait]
+	impl Plugin for HangingHandlerPlugin {
+		fn metadata(&self) -> PluginMetadata {
+			PluginMetadata::new("hanging-handler", "0.1.0", "Never finishes a handler")
+		}
+
+		async fn handle_event(
+			&mut self,
+			_event: &ChainEvent,
+			_context: &PluginContext,
+		) -> PluginResult {
+			std::future::pending().await
+		}
+	}
+
+	struct ShutdownFailurePlugin {
+		name: &'static str,
+	}
+
+	struct HangingShutdownPlugin;
+
+	#[async_trait]
+	impl Plugin for HangingShutdownPlugin {
+		fn metadata(&self) -> PluginMetadata {
+			PluginMetadata::new("hanging-shutdown", "0.1.0", "Never finishes shutdown")
+		}
+
+		async fn handle_event(
+			&mut self,
+			_event: &ChainEvent,
+			_context: &PluginContext,
+		) -> PluginResult {
+			Ok(())
+		}
+
+		async fn shutdown(&mut self, _context: &PluginContext) -> PluginResult {
+			std::future::pending().await
+		}
+	}
+
+	#[async_trait]
+	impl Plugin for ShutdownFailurePlugin {
+		fn metadata(&self) -> PluginMetadata {
+			PluginMetadata::new(self.name, "0.1.0", "Fails during shutdown")
+		}
+
+		async fn handle_event(
+			&mut self,
+			_event: &ChainEvent,
+			_context: &PluginContext,
+		) -> PluginResult {
+			Ok(())
+		}
+
+		async fn shutdown(&mut self, _context: &PluginContext) -> PluginResult {
+			Err(PluginError::Other(format!("{} shutdown failed", self.name)))
+		}
 	}
 
 	#[async_trait]
@@ -726,6 +960,85 @@ mod tests {
 			*observed.lock().expect("ordering lock should not be poisoned"),
 			vec![1, 2, 3, 4, 5]
 		);
+	}
+
+	#[tokio::test]
+	async fn handler_timeout_quarantines_only_its_worker_and_reports_health() {
+		let timeouts = PluginTimeouts {
+			startup: TEST_TIMEOUT,
+			handler: Duration::from_millis(10),
+			shutdown: TEST_TIMEOUT,
+		};
+		let mut runtime = Runtime::new(test_chain_id()).with_plugin_timeouts(timeouts).unwrap();
+		let mut outcomes = runtime.subscribe_outcomes();
+		runtime.register_plugin(HangingHandlerPlugin).unwrap();
+		runtime.start().await.unwrap();
+		let receipt = runtime.process(test_event()).await.unwrap();
+		let outcome = outcome_for(&mut outcomes, receipt.dispatch_id(), "hanging-handler").await;
+		assert!(matches!(outcome.status(), PluginOutcomeStatus::TimedOut(_)));
+		assert_eq!(runtime.plugin_health()[0].status(), crate::PluginHealthStatus::Quarantined);
+		runtime.shutdown().await.unwrap();
+	}
+
+	#[tokio::test]
+	async fn startup_timeout_is_bounded_and_prevents_partial_runtime_start() {
+		let timeouts = PluginTimeouts {
+			startup: Duration::from_millis(10),
+			handler: TEST_TIMEOUT,
+			shutdown: TEST_TIMEOUT,
+		};
+		let mut runtime = Runtime::new(test_chain_id()).with_plugin_timeouts(timeouts).unwrap();
+		runtime.register_plugin(HangingStartupPlugin).unwrap();
+
+		let error = timeout(TEST_TIMEOUT, runtime.start())
+			.await
+			.expect("runtime startup must be bounded")
+			.expect_err("hanging startup must fail");
+		assert!(matches!(error, RuntimeError::PluginTimeout { operation: "startup", .. }));
+		assert!(!runtime.is_started());
+	}
+
+	#[tokio::test]
+	async fn reports_every_shutdown_failure_after_all_workers_finish() {
+		let mut runtime = Runtime::new(test_chain_id());
+		runtime.register_plugin(ShutdownFailurePlugin { name: "failure-a" }).unwrap();
+		runtime.register_plugin(ShutdownFailurePlugin { name: "failure-b" }).unwrap();
+		runtime.start().await.unwrap();
+
+		let error = runtime.shutdown().await.expect_err("both shutdown hooks should fail");
+		let RuntimeError::MultipleLifecycleFailures { failures } = error else {
+			panic!("expected aggregated lifecycle failures");
+		};
+		assert_eq!(failures.len(), 2);
+		assert!(failures.iter().any(|failure| failure.contains("failure-a")));
+		assert!(failures.iter().any(|failure| failure.contains("failure-b")));
+	}
+
+	#[tokio::test]
+	async fn shutdown_timeout_does_not_prevent_sibling_cleanup() {
+		let shutdowns = Arc::new(AtomicUsize::new(0));
+		let timeouts = PluginTimeouts {
+			startup: TEST_TIMEOUT,
+			handler: TEST_TIMEOUT,
+			shutdown: Duration::from_millis(10),
+		};
+		let mut runtime = Runtime::new(test_chain_id()).with_plugin_timeouts(timeouts).unwrap();
+		runtime.register_plugin(HangingShutdownPlugin).unwrap();
+		runtime
+			.register_plugin(LifecyclePlugin {
+				starts: Arc::new(AtomicUsize::new(0)),
+				events: Arc::new(AtomicUsize::new(0)),
+				shutdowns: Arc::clone(&shutdowns),
+			})
+			.unwrap();
+		runtime.start().await.unwrap();
+
+		let error = timeout(TEST_TIMEOUT, runtime.shutdown())
+			.await
+			.expect("shutdown must be bounded")
+			.expect_err("hanging shutdown must fail");
+		assert!(matches!(error, RuntimeError::PluginTimeout { operation: "shutdown", .. }));
+		assert_eq!(shutdowns.load(Ordering::SeqCst), 1);
 	}
 
 	#[test]

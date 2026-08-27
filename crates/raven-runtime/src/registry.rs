@@ -1,7 +1,36 @@
+//! Pre-start plugin ownership.
+//!
+//! The registry is a temporary parking area. It owns boxed plugin values while
+//! the runtime is still configurable, rejects duplicate metadata names, and then
+//! transfers ownership to worker tasks during startup.
+//!
+//! ```text
+//! before Runtime::start
+//!
+//! Runtime
+//!   |
+//!   v
+//! Dispatcher
+//!   |
+//!   v
+//! PluginRegistry
+//!   +-- Box<dyn Plugin> A
+//!   +-- Box<dyn Plugin> B
+//!
+//! after Runtime::start
+//!
+//! worker task A owns Plugin A
+//! worker task B owns Plugin B
+//! registry is empty
+//! ```
+
 use crate::{RuntimeError, RuntimeResult};
 use raven_plugin_sdk::Plugin;
 
 /// Stores plugins registered with a Raven runtime.
+///
+/// This type deliberately stays private to the crate. Public callers register
+/// through `Runtime`, which can enforce lifecycle state before delegating here.
 #[derive(Default)]
 pub(crate) struct PluginRegistry {
 	plugins: Vec<Box<dyn Plugin>>,
@@ -26,6 +55,10 @@ impl PluginRegistry {
 	/// Registers a plugin.
 	///
 	/// Plugin names must be unique within one runtime instance.
+	///
+	/// The metadata name is used later in delivery receipts, plugin outcomes, and
+	/// health snapshots, so duplicate names would make runtime accounting
+	/// ambiguous.
 	pub(crate) fn register(&mut self, plugin: Box<dyn Plugin>) -> RuntimeResult {
 		let plugin_name = plugin.metadata().name;
 
@@ -42,6 +75,9 @@ impl PluginRegistry {
 	}
 
 	/// Transfers all registered plugins to runtime workers.
+	///
+	/// `std::mem::take` drains the registry and gives each worker exclusive
+	/// ownership of its plugin value.
 	pub(crate) fn take_plugins(&mut self) -> Vec<Box<dyn Plugin>> {
 		std::mem::take(&mut self.plugins)
 	}

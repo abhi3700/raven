@@ -11,10 +11,10 @@ stateDiagram-v2
     [*] --> Registered
     Registered --> Starting: Runtime start
     Starting --> Running: start returns Ok
-    Starting --> StartupFailed: start returns Err or panics
+    Starting --> StartupFailed: start errors, panics, or times out
     StartupFailed --> [*]
     Running --> Running: handle returns Ok or Err
-    Running --> Quarantined: handle panics
+    Running --> Quarantined: handle panics or times out
     Running --> Draining: Runtime shutdown
     Quarantined --> Stopping: queued events rejected
     Draining --> Stopping: accepted events drained
@@ -65,7 +65,7 @@ sequenceDiagram
 ```
 
 Startup is intentionally a global barrier: dispatch cannot begin against a
-partially ready plugin set. If any startup returns `Err` or panics, Raven closes
+partially ready plugin set. If any startup returns `Err`, panics, or times out, Raven closes
 all mailboxes, waits for workers that did start to shut down, marks the runtime
 as shut down, and returns the startup error.
 
@@ -107,10 +107,10 @@ Plugin A returns Err -> emit Failed(A) -> Plugin A receives its next event
 Plugin B still runs  -> emit its own result whenever it completes
 ```
 
-The error does not return from another plugin's work, stop the source loop, or
-cancel sibling workers. Subscribers receive it immediately as
+The runtime does not cancel sibling workers. Subscribers receive it immediately as
 `PluginOutcomeStatus::Failed` with the plugin name, dispatch ID, event, and
-elapsed handler time.
+elapsed handler time. The standalone CLI treats it as a failed checkpoint unit,
+stops further source dispatch, and begins graceful cleanup after reporting it.
 
 Use the closest error category: invalid configuration, event processing,
 storage, or `Other`.
@@ -127,8 +127,15 @@ boundary and quarantines only that plugin:
 4. Run the plugin's `shutdown` hook.
 5. Reject future dispatches to that worker as `WorkerStopped`.
 
-Other workers remain active. Automatic restart is intentionally deferred until
-plugins have an explicit state-recovery contract.
+Other workers remain active. A handler timeout follows the same quarantine path
+and emits `TimedOut`. Automatic in-process restart is intentionally disabled:
+the CLI restarts with a fresh plugin instance and replays from the last durable
+checkpoint instead of trusting possibly inconsistent mutable state.
+
+Configure positive deadlines with `Runtime::with_plugin_timeouts`. Defaults are
+30 seconds for startup, 60 seconds per handler, and 30 seconds for shutdown.
+Inspect current worker state with `Runtime::plugin_health`; snapshots report
+`Starting`, `Healthy`, `Quarantined`, or `Stopped`.
 
 ## Backpressure state
 
@@ -155,9 +162,10 @@ Runtime waits for A + B + C, then returns
 ```
 
 All senders are closed before Raven awaits any `JoinHandle`, so awaiting the
-first handle does not serialize worker execution. Raven records the first
-shutdown failure but still joins every worker. The runtime transitions to
-`Shutdown` whether cleanup succeeds or returns an error.
+first handle does not serialize worker execution. Raven records every shutdown
+failure, still joins every worker, and returns an aggregate when more than one
+hook fails. The runtime transitions to `Shutdown` whether cleanup succeeds or
+returns an error.
 
 The CLI calls this path after Ctrl+C or when the source stops. A process crash
 or forced Tokio-runtime termination cannot provide the same drain guarantee.
@@ -169,8 +177,9 @@ or forced Tokio-runtime termination cannot provide the same drain guarantee.
 | Registration | Not running | No | Invalid registration only |
 | Startup | Concurrent tasks | Yes, readiness barrier | Startup aborts the runtime and cleans up siblings |
 | Dispatch delivery | Non-blocking `try_send` | No handler wait | Rejection belongs to one plugin |
-| Event execution | Concurrent across workers, FIFO within one worker | Observed through live outcomes | Returned error affects one event; panic quarantines one worker |
-| Shutdown | Concurrent drain and cleanup | Yes, cleanup barrier | All workers are joined before an error returns |
+| Event execution | Concurrent across workers, FIFO within one worker | Observed through live outcomes | Returned error affects one event; panic/timeout quarantines one worker |
+| Shutdown | Concurrent bounded drain and cleanup | Yes, cleanup barrier | All workers are joined; multiple failures are aggregated |
 
-Per-hook timeouts, multi-error aggregation, health APIs, restart supervision,
-and durable dead-letter handling remain planned reliability work.
+Durable dead-letter handling remains planned and will be added only with a
+concrete recovery workflow. The current production recovery contract is
+checkpoint replay with idempotent plugins.

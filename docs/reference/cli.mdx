@@ -39,6 +39,8 @@ raven run [--rpc-url <URL>] [OPTIONS]
 | `--rpc-url <URL>`                   | `NODE_RPC_URL` | Saved config | EVM-compatible HTTP(S) or WS(S) JSON-RPC endpoint             |
 | `--poll-interval-ms <MS>`           | —              | `4000`       | HTTP(S) block-number poll interval; must be greater than zero |
 | `--reconciliation-interval-ms <MS>` | —              | `30000`      | WS(S) safety reconciliation; must be greater than zero        |
+| `--start <POSITION>`                | —              | `resume`     | `resume`, `latest`, or an inclusive block height              |
+| `--reorg-depth <BLOCKS>`             | —              | `64`         | Canonical ancestry retained for shallow-fork correction       |
 
 Example:
 
@@ -53,6 +55,12 @@ or `wss://`. Raven discovers its chain ID with `eth_chainId`; there is no
 hard-coded allowlist. HTTP(S) uses the polling interval. WS(S) uses
 `eth_subscribe("newHeads")` as its primary trigger and the reconciliation
 interval as a safety check. Both feed the same ordered full-block catch-up path.
+
+The default `--start resume` loads a chain-specific checkpoint. If none exists,
+it starts at the current head. `latest` deliberately ignores the checkpoint;
+a numeric value backfills from that block inclusively. The checkpoint advances
+only after every plugin reports success, so a crash or plugin failure replays
+the unacknowledged event on restart.
 
 ### Why there is no `--source`
 
@@ -70,10 +78,11 @@ flowchart LR
 ```
 
 Reth ExEx ingestion will not be added as `raven run --source reth`. An ExEx is
-compiled into the same binary as Reth and launched with the node, so the
-planned integration is a separate Raven-enabled Reth binary with its own node
-arguments. This keeps incompatible deployment configuration out of
-`raven run` and keeps the default CLI free of Reth's dependency footprint.
+compiled into the same binary as Reth and launched with the node. The planned
+integration is therefore a version-pinned Raven-enabled **Reth CLI**: operators
+will run `reth node` with Raven/plugin configuration and the builder will
+install Raven as an ExEx. This keeps incompatible deployment configuration out
+of `raven run` and keeps the default CLI free of Reth's dependency footprint.
 
 Passing the removed `--source` option is an error. Existing commands should
 drop `--source alloy`; no replacement option is needed.
@@ -143,14 +152,16 @@ normal CLI output.
 
 ## `raven doctor`
 
-Print the Raven CLI version and confirm that the executable starts:
+Validate configuration and test RPC connectivity without starting ingestion:
 
 ```bash
-raven doctor
+raven doctor [--rpc-url <URL>] [--timeout-ms <MS>]
 ```
 
-This is a lightweight binary check. It does not currently test RPC
-connectivity, storage, or plugin loading.
+The RPC URL uses the same flag, `NODE_RPC_URL`, and persisted-config precedence
+as `raven run`. On success, the command prints the CLI version, selected
+transport, discovered chain ID, latest block, and check latency. Invalid
+configuration, connection failure, or timeout exits unsuccessfully.
 
 ## `raven config set`
 

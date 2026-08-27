@@ -1,28 +1,48 @@
-use std::{sync::Arc, time::Duration};
+use std::{collections::HashSet, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
-use eyre::Result;
+use eyre::{Result, WrapErr, bail};
 use raven_core::ChainEvent;
 use raven_plugin_sdk::{Plugin, PluginContext, PluginMetadata, PluginResult};
-use raven_runtime::{PluginOutcome, PluginOutcomeStatus, Runtime};
-use raven_source_alloy::AlloySource;
+use raven_runtime::{DispatchReceipt, PluginOutcome, PluginOutcomeStatus, Runtime};
+use raven_source_alloy::{AlloySource, SourceStart, inspect_rpc_endpoint};
 use tokio::{
 	sync::{broadcast, mpsc},
 	task::JoinHandle,
 };
 use tracing::{debug, error, info, warn};
 
-use crate::cli::RunArgs;
+use crate::{
+	checkpoint::Checkpoint,
+	cli::{RunArgs, StartArg},
+};
 
 const EVENT_CHANNEL_CAPACITY: usize = 256;
+const RPC_INSPECTION_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Runs RPC ingestion until it stops or the user presses Ctrl+C.
 pub(crate) async fn run(args: RunArgs, rpc_url: String) -> Result<()> {
-	let (event_sender, mut event_receiver) = mpsc::channel(EVENT_CHANNEL_CAPACITY);
-	let source_task = spawn_rpc_source(&args, rpc_url, event_sender);
-	let mut runtime = None;
+	let endpoint = tokio::time::timeout(RPC_INSPECTION_TIMEOUT, inspect_rpc_endpoint(&rpc_url))
+		.await
+		.wrap_err("RPC connectivity check timed out")??;
+	let (source_start, mut checkpoint) = resolve_start(&args, endpoint.chain_id)?;
 
-	info!(ingestion = "rpc", "Raven is running; press Ctrl+C to stop");
+	let mut runtime = Runtime::new(endpoint.chain_id);
+	runtime.register_plugin(BlockLoggerPlugin)?;
+	let outcomes = runtime.subscribe_outcomes();
+	runtime.start().await?;
+	let mut session = RuntimeSession { runtime, outcomes };
+
+	let (event_sender, mut event_receiver) = mpsc::channel(EVENT_CHANNEL_CAPACITY);
+	let source_task = spawn_rpc_source(&args, rpc_url, source_start, event_sender);
+
+	info!(
+		ingestion = "rpc",
+		chain_id = endpoint.chain_id.get(),
+		transport = %endpoint.transport,
+		latest_block = endpoint.latest_block,
+		"Raven is running; press Ctrl+C to stop"
+	);
 
 	let event_loop_result: Result<EventLoopExit> = loop {
 		tokio::select! {
@@ -41,7 +61,12 @@ pub(crate) async fn run(args: RunArgs, rpc_url: String) -> Result<()> {
 					break Ok(EventLoopExit::SourceStopped);
 				};
 
-				if let Err(error) = process_event(&mut runtime, event).await {
+				if let Err(error) = process_event(
+					&mut session,
+					&mut checkpoint,
+					event,
+					args.reorg_depth,
+				).await {
 					break Err(error);
 				}
 			}
@@ -53,87 +78,141 @@ pub(crate) async fn run(args: RunArgs, rpc_url: String) -> Result<()> {
 	}
 
 	let source_result = await_source(source_task).await;
-	let shutdown_result = shutdown_runtime(runtime).await;
+	let shutdown_result = session.runtime.shutdown().await;
 
 	// Cleanup always runs before the first operational error is returned.
 	event_loop_result?;
 	source_result?;
-	shutdown_result
+	shutdown_result?;
+	Ok(())
+}
+
+fn resolve_start(
+	args: &RunArgs,
+	chain_id: raven_core::ChainId,
+) -> Result<(SourceStart, Checkpoint)> {
+	match args.start {
+		StartArg::Latest => Ok((SourceStart::Latest, Checkpoint::empty(chain_id))),
+		StartArg::Block(block) => Ok((SourceStart::Block(block), Checkpoint::empty(chain_id))),
+		StartArg::Resume => match Checkpoint::load(chain_id)? {
+			Some(checkpoint) if !checkpoint.blocks().is_empty() => {
+				let keep_from = checkpoint.blocks().len().saturating_sub(args.reorg_depth);
+				let window = checkpoint.blocks()[keep_from..].to_vec();
+				info!(
+					chain_id = chain_id.get(),
+					block_number = window.last().map(raven_core::BlockEvent::block_number),
+					retained_blocks = window.len(),
+					"resuming from durable checkpoint"
+				);
+				Ok((SourceStart::Resume(window), checkpoint))
+			},
+			_ => {
+				info!(chain_id = chain_id.get(), "no durable checkpoint found; starting at latest");
+				Ok((SourceStart::Latest, Checkpoint::empty(chain_id)))
+			},
+		},
+	}
 }
 
 fn spawn_rpc_source(
 	args: &RunArgs,
 	rpc_url: String,
+	start: SourceStart,
 	event_sender: mpsc::Sender<ChainEvent>,
 ) -> JoinHandle<Result<()>> {
-	let poll_interval = Duration::from_millis(args.poll_interval_ms);
-	let reconciliation_interval = Duration::from_millis(args.reconciliation_interval_ms);
-
 	let source = AlloySource::new(rpc_url)
-		.with_poll_interval(poll_interval)
-		.with_reconciliation_interval(reconciliation_interval);
+		.with_poll_interval(Duration::from_millis(args.poll_interval_ms))
+		.with_reconciliation_interval(Duration::from_millis(args.reconciliation_interval_ms))
+		.with_reorg_depth(args.reorg_depth)
+		.with_start(start);
 
 	tokio::spawn(async move { source.run(event_sender).await.map_err(Into::into) })
 }
 
-async fn process_event(runtime: &mut Option<RuntimeSession>, event: ChainEvent) -> Result<()> {
-	if runtime.is_none() {
-		let mut initialized_runtime = Runtime::new(event.chain_id());
+async fn process_event(
+	session: &mut RuntimeSession,
+	checkpoint: &mut Checkpoint,
+	event: ChainEvent,
+	reorg_depth: usize,
+) -> Result<()> {
+	let checkpoint_event = event.clone();
+	let receipt = session.runtime.process(event).await?;
+	wait_for_success(&mut session.outcomes, &receipt).await?;
+	checkpoint.apply_and_save(&checkpoint_event, reorg_depth)?;
+	debug!(
+		dispatch_id = receipt.dispatch_id().get(),
+		block_number = checkpoint_event.block_number(),
+		applied = checkpoint_event.is_applied(),
+		"durable event checkpoint committed"
+	);
+	Ok(())
+}
 
-		initialized_runtime.register_plugin(BlockLoggerPlugin)?;
-		initialized_runtime.start().await?;
-		let outcome_task = spawn_outcome_logger(initialized_runtime.subscribe_outcomes());
-
-		*runtime = Some(RuntimeSession { runtime: initialized_runtime, outcome_task });
-	}
-
-	let receipt = runtime
-		.as_mut()
-		.expect("runtime is initialized before event processing")
-		.runtime
-		.process(event)
-		.await?;
+async fn wait_for_success(
+	outcomes: &mut broadcast::Receiver<Arc<PluginOutcome>>,
+	receipt: &DispatchReceipt,
+) -> Result<()> {
+	let mut pending: HashSet<&'static str> = receipt
+		.deliveries()
+		.iter()
+		.filter(|delivery| delivery.is_accepted())
+		.map(|delivery| delivery.plugin())
+		.collect();
 
 	if !receipt.all_accepted() {
-		warn!(
-			dispatch_id = receipt.dispatch_id().get(),
-			accepted = receipt.accepted_count(),
-			rejected = receipt.rejected_count(),
-			"event was not accepted by every plugin"
+		for delivery in receipt.deliveries().iter().filter(|delivery| !delivery.is_accepted()) {
+			warn!(
+				dispatch_id = receipt.dispatch_id().get(),
+				plugin = delivery.plugin(),
+				status = ?delivery.status(),
+				"plugin rejected event; checkpoint will not advance"
+			);
+		}
+		bail!(
+			"dispatch {} was rejected by {} plugin(s); checkpoint was not advanced",
+			receipt.dispatch_id().get(),
+			receipt.rejected_count()
 		);
 	}
 
-	Ok(())
-}
-
-async fn shutdown_runtime(runtime: Option<RuntimeSession>) -> Result<()> {
-	let Some(mut session) = runtime else {
-		return Ok(());
-	};
-
-	let shutdown_result = session.runtime.shutdown().await;
-	drop(session.runtime);
-
-	let outcome_task_result = session.outcome_task.await;
-
-	shutdown_result?;
-	outcome_task_result?;
-
-	Ok(())
-}
-
-fn spawn_outcome_logger(mut outcomes: broadcast::Receiver<Arc<PluginOutcome>>) -> JoinHandle<()> {
-	tokio::spawn(async move {
-		loop {
-			match outcomes.recv().await {
-				Ok(outcome) => log_plugin_outcome(&outcome),
-				Err(broadcast::error::RecvError::Lagged(skipped)) => {
-					warn!(skipped, "plugin outcome logger fell behind");
-				},
-				Err(broadcast::error::RecvError::Closed) => break,
-			}
+	while !pending.is_empty() {
+		let outcome = outcomes.recv().await.map_err(|error| match error {
+			broadcast::error::RecvError::Lagged(skipped) =>
+				eyre::eyre!("missed {skipped} plugin outcome(s); checkpoint cannot advance safely"),
+			broadcast::error::RecvError::Closed => {
+				eyre::eyre!("plugin outcome channel closed before dispatch completed")
+			},
+		})?;
+		log_plugin_outcome(&outcome);
+		if outcome.dispatch_id() != receipt.dispatch_id() || !pending.remove(outcome.plugin()) {
+			continue;
 		}
-	})
+
+		match outcome.status() {
+			PluginOutcomeStatus::Succeeded => {},
+			PluginOutcomeStatus::Failed(error) => bail!(
+				"plugin '{}' failed dispatch {}: {error}; checkpoint was not advanced",
+				outcome.plugin(),
+				receipt.dispatch_id().get()
+			),
+			PluginOutcomeStatus::Panicked(message) => bail!(
+				"plugin '{}' panicked during dispatch {}: {message}; checkpoint was not advanced",
+				outcome.plugin(),
+				receipt.dispatch_id().get()
+			),
+			PluginOutcomeStatus::TimedOut(duration) => bail!(
+				"plugin '{}' timed out after {duration:?} during dispatch {}; checkpoint was not advanced",
+				outcome.plugin(),
+				receipt.dispatch_id().get()
+			),
+			PluginOutcomeStatus::Rejected(reason) => bail!(
+				"plugin '{}' rejected dispatch {} ({reason:?}); checkpoint was not advanced",
+				outcome.plugin(),
+				receipt.dispatch_id().get()
+			),
+		}
+	}
+	Ok(())
 }
 
 fn log_plugin_outcome(outcome: &PluginOutcome) {
@@ -147,23 +226,19 @@ fn log_plugin_outcome(outcome: &PluginOutcome) {
 			debug!(dispatch_id, plugin, block_number, elapsed_micros, "plugin completed event");
 		},
 		PluginOutcomeStatus::Failed(error) => {
-			error!(
-				dispatch_id,
-				plugin,
-				block_number,
-				elapsed_micros,
-				error = %error,
-				"plugin failed to handle event; worker remains active"
-			);
+			error!(dispatch_id, plugin, block_number, elapsed_micros, error = %error, "plugin failed to handle event; worker remains active");
 		},
 		PluginOutcomeStatus::Panicked(message) => {
+			error!(dispatch_id, plugin, block_number, elapsed_micros, panic = %message, "plugin panicked; worker was quarantined");
+		},
+		PluginOutcomeStatus::TimedOut(duration) => {
 			error!(
 				dispatch_id,
 				plugin,
 				block_number,
 				elapsed_micros,
-				panic = %message,
-				"plugin panicked; worker was quarantined"
+				timeout_ms = duration.as_millis(),
+				"plugin timed out; worker was quarantined"
 			);
 		},
 		PluginOutcomeStatus::Rejected(reason) => {
@@ -180,44 +255,9 @@ async fn await_source(source_task: JoinHandle<Result<()>>) -> Result<()> {
 	}
 }
 
-#[cfg(test)]
-mod tests {
-	use raven_core::{BlockEvent, ChainId};
-
-	use super::*;
-
-	#[tokio::test]
-	async fn initializes_runtime_from_non_ethereum_first_event() {
-		let chain_id = ChainId::new(8_453).expect("Base chain ID should be valid");
-		let block = BlockEvent::new(
-			chain_id,
-			21_000_000,
-			"0x1111111111111111111111111111111111111111111111111111111111111111",
-			"0x2222222222222222222222222222222222222222222222222222222222222222",
-			1_720_000_000,
-			150,
-		)
-		.expect("block should be valid");
-
-		let mut runtime = None;
-
-		process_event(&mut runtime, ChainEvent::BlockApplied(block))
-			.await
-			.expect("event should initialize the runtime and be processed");
-
-		let session = runtime.as_mut().expect("runtime should be initialized");
-
-		assert!(session.runtime.is_started());
-		assert_eq!(session.runtime.chain_id(), chain_id);
-		assert_eq!(session.runtime.plugin_count(), 1);
-
-		shutdown_runtime(runtime).await.expect("runtime should shut down");
-	}
-}
-
 struct RuntimeSession {
 	runtime: Runtime,
-	outcome_task: JoinHandle<()>,
+	outcomes: broadcast::Receiver<Arc<PluginOutcome>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -241,27 +281,119 @@ impl Plugin for BlockLoggerPlugin {
 
 	async fn start(&mut self, context: &PluginContext) -> PluginResult {
 		info!(chain_id = context.chain_id().get(), "block logger plugin started");
-
 		Ok(())
 	}
 
 	async fn handle_event(&mut self, event: &ChainEvent, _context: &PluginContext) -> PluginResult {
 		let block = event.block();
-
-		info!(
-			block_number = block.block_number(),
-			block_hash = %block.block_hash(),
-			transactions = block.transaction_count(),
-			applied = event.is_applied(),
-			"processed block"
-		);
-
+		info!(block_number = block.block_number(), block_hash = %block.block_hash(), transactions = block.transaction_count(), applied = event.is_applied(), "processed block");
 		Ok(())
 	}
 
 	async fn shutdown(&mut self, _context: &PluginContext) -> PluginResult {
 		info!("block logger plugin stopped");
-
 		Ok(())
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use raven_core::{BlockEvent, ChainId};
+	use raven_plugin_sdk::PluginError;
+	use tokio::sync::Notify;
+
+	struct FailingPlugin;
+
+	#[async_trait]
+	impl Plugin for FailingPlugin {
+		fn metadata(&self) -> PluginMetadata {
+			PluginMetadata::new("failing", "0.1.0", "Fails immediately")
+		}
+
+		async fn handle_event(
+			&mut self,
+			_event: &ChainEvent,
+			_context: &PluginContext,
+		) -> PluginResult {
+			Err(PluginError::EventProcessing("expected failure".to_owned()))
+		}
+	}
+
+	struct WaitingPlugin {
+		entered: Arc<Notify>,
+		release: Arc<Notify>,
+	}
+
+	#[async_trait]
+	impl Plugin for WaitingPlugin {
+		fn metadata(&self) -> PluginMetadata {
+			PluginMetadata::new("waiting", "0.1.0", "Waits for test release")
+		}
+
+		async fn handle_event(
+			&mut self,
+			_event: &ChainEvent,
+			_context: &PluginContext,
+		) -> PluginResult {
+			self.entered.notify_one();
+			self.release.notified().await;
+			Ok(())
+		}
+	}
+
+	fn event() -> ChainEvent {
+		ChainEvent::BlockApplied(
+			BlockEvent::new(
+				ChainId::new(8453).unwrap(),
+				10,
+				format!("0x{:064x}", 10),
+				format!("0x{:064x}", 9),
+				1,
+				0,
+			)
+			.unwrap(),
+		)
+	}
+
+	#[tokio::test]
+	async fn commits_only_after_all_plugins_succeed() {
+		let mut runtime = Runtime::new(ChainId::new(8453).unwrap());
+		runtime.register_plugin(BlockLoggerPlugin).unwrap();
+		let outcomes = runtime.subscribe_outcomes();
+		runtime.start().await.unwrap();
+		let mut session = RuntimeSession { runtime, outcomes };
+		let receipt = session.runtime.process(event()).await.unwrap();
+		wait_for_success(&mut session.outcomes, &receipt).await.unwrap();
+		session.runtime.shutdown().await.unwrap();
+	}
+
+	#[tokio::test]
+	async fn returns_first_plugin_error_without_waiting_for_slow_sibling() {
+		let entered = Arc::new(Notify::new());
+		let release = Arc::new(Notify::new());
+		let mut runtime = Runtime::new(ChainId::new(8453).unwrap());
+		runtime.register_plugin(FailingPlugin).unwrap();
+		runtime
+			.register_plugin(WaitingPlugin {
+				entered: Arc::clone(&entered),
+				release: Arc::clone(&release),
+			})
+			.unwrap();
+		let mut outcomes = runtime.subscribe_outcomes();
+		runtime.start().await.unwrap();
+		let receipt = runtime.process(event()).await.unwrap();
+		entered.notified().await;
+
+		let result = tokio::time::timeout(
+			Duration::from_millis(100),
+			wait_for_success(&mut outcomes, &receipt),
+		)
+		.await
+		.expect("failing plugin must report without waiting for its sibling");
+		assert!(result.is_err());
+
+		release.notify_one();
+		runtime.shutdown().await.unwrap();
 	}
 }

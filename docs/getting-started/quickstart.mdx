@@ -56,9 +56,9 @@ Remove the persisted value when it is no longer needed:
 raven config clear
 ```
 
-Raven calls `eth_chainId` and accepts any non-zero EIP-155 chain ID. The first
-event initializes the runtime and every plugin receives the detected chain ID
-through `PluginContext`; no Ethereum-mainnet value is hard-coded. Raven then
+Raven calls `eth_chainId` and accepts any non-zero EIP-155 chain ID. It uses the
+detected chain ID to load a per-chain checkpoint and initialize the runtime;
+every plugin receives that ID through `PluginContext`. Raven then
 fetches full blocks and passes normalized events through the runtime. HTTP(S)
 endpoints use block-number polling. WS(S) endpoints use `newHeads`
 subscriptions for immediate notification plus a slower safety reconciliation.
@@ -79,6 +79,26 @@ WebSocket subscriptions from the endpoint scheme.
 
 Press Ctrl+C. Raven stops the source task and calls `shutdown()` on each started
 plugin before exiting.
+
+## Choose a start position
+
+The default resumes after the last block that every plugin completed:
+
+```bash
+raven run --start resume
+```
+
+With no checkpoint, `resume` starts at the current head. To intentionally
+ignore saved progress, use `--start latest`. To backfill from an inclusive
+height, pass the number:
+
+```bash
+raven run --start 20_000_000
+```
+
+Raven retains 64 acknowledged blocks by default for shallow-reorg detection.
+Set `--reorg-depth <BLOCKS>` to change that bound. Reverted blocks are delivered
+from tip toward the common ancestor before replacements are applied.
 
 ## Tune ingestion intervals
 
@@ -106,11 +126,9 @@ Reconciliation recovers height gaps after a missed notification or reconnect.
 A longer interval reduces safety requests but increases the worst-case time to
 discover such a gap. Both interval values must be greater than zero.
 
-<Warning>
-    The RPC source currently starts from the latest block observed at startup
-    and does not backfill older history. It also emits applied blocks only;
-    reorg detection is planned.
-</Warning>
+Before debugging the event loop, check config and connectivity with
+`raven doctor`. It reports the transport, chain ID, current head, and latency
+without starting plugins.
 
 ## Next steps
 

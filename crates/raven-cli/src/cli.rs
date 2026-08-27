@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use clap::{
 	Args, Parser, Subcommand,
 	builder::styling::{AnsiColor, Effects, Styles},
@@ -40,7 +42,7 @@ pub(crate) enum Command {
 	},
 
 	/// Inspect the Raven installation and configuration.
-	Doctor,
+	Doctor(DoctorArgs),
 
 	/// Manage persistent Raven configuration.
 	Config {
@@ -63,6 +65,57 @@ pub(crate) struct RunArgs {
 	/// WS(S) safety interval for reconciling missed block notifications.
 	#[arg(long, default_value_t = 30_000, value_parser = clap::value_parser!(u64).range(1..))]
 	pub(crate) reconciliation_interval_ms: u64,
+
+	/// Initial position: `resume`, `latest`, or an inclusive block number.
+	#[arg(long, default_value = "resume", value_name = "resume|latest|BLOCK")]
+	pub(crate) start: StartArg,
+
+	/// Number of recent canonical blocks retained for shallow reorgs.
+	#[arg(long, default_value_t = 64, value_parser = parse_positive_usize)]
+	pub(crate) reorg_depth: usize,
+}
+
+/// RPC checks performed by `raven doctor`.
+#[derive(Debug, Args)]
+pub(crate) struct DoctorArgs {
+	/// EVM-compatible HTTP(S) or WS(S) JSON-RPC endpoint.
+	#[arg(long, env = "NODE_RPC_URL")]
+	pub(crate) rpc_url: Option<String>,
+
+	/// Maximum time allowed for the connectivity check.
+	#[arg(long, default_value_t = 10_000, value_parser = clap::value_parser!(u64).range(1..))]
+	pub(crate) timeout_ms: u64,
+}
+
+/// User-selected initial event position.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StartArg {
+	Resume,
+	Latest,
+	Block(u64),
+}
+
+impl FromStr for StartArg {
+	type Err = String;
+
+	fn from_str(value: &str) -> Result<Self, Self::Err> {
+		match value {
+			"resume" => Ok(Self::Resume),
+			"latest" => Ok(Self::Latest),
+			value => value
+				.parse::<u64>()
+				.map(Self::Block)
+				.map_err(|_| "expected `resume`, `latest`, or a block number".to_owned()),
+		}
+	}
+}
+
+fn parse_positive_usize(value: &str) -> Result<usize, String> {
+	let value = value.parse::<usize>().map_err(|_| "expected a positive integer".to_owned())?;
+	if value == 0 {
+		return Err("value must be greater than zero".to_owned());
+	}
+	Ok(value)
 }
 
 /// Persistent-configuration commands.
@@ -135,6 +188,21 @@ mod tests {
 		assert_eq!(args.rpc_url.as_deref(), Some("http://localhost:8545"));
 		assert_eq!(args.poll_interval_ms, 1_000);
 		assert_eq!(args.reconciliation_interval_ms, 30_000);
+		assert_eq!(args.start, StartArg::Resume);
+		assert_eq!(args.reorg_depth, 64);
+	}
+
+	#[test]
+	fn parses_all_start_positions() {
+		for (value, expected) in [
+			("resume", StartArg::Resume),
+			("latest", StartArg::Latest),
+			("12345", StartArg::Block(12_345)),
+		] {
+			let cli = Cli::try_parse_from(["raven", "run", "--start", value]).unwrap();
+			let Some(Command::Run(args)) = cli.command else { panic!("run expected") };
+			assert_eq!(args.start, expected);
+		}
 	}
 
 	#[test]
@@ -214,5 +282,21 @@ mod tests {
 		};
 
 		assert_eq!(name, "whale-detector");
+	}
+
+	#[test]
+	fn parses_doctor_rpc_check_options() {
+		let cli = Cli::try_parse_from([
+			"raven",
+			"doctor",
+			"--rpc-url",
+			"http://localhost:8545",
+			"--timeout-ms",
+			"2500",
+		])
+		.unwrap();
+		let Some(Command::Doctor(args)) = cli.command else { panic!("doctor expected") };
+		assert_eq!(args.rpc_url.as_deref(), Some("http://localhost:8545"));
+		assert_eq!(args.timeout_ms, 2_500);
 	}
 }

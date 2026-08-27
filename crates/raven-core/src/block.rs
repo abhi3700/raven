@@ -1,4 +1,5 @@
 use crate::{ChainId, CoreError};
+use alloy_primitives::B256;
 use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
 
 /// Source-independent metadata for an EVM block.
@@ -120,11 +121,7 @@ impl<'de> Deserialize<'de> for BlockEvent {
 }
 
 fn validate_block_hash(field: &'static str, value: &str) -> Result<(), CoreError> {
-	let valid = value.len() == 66 &&
-		value.starts_with("0x") &&
-		value.as_bytes()[2..].iter().all(u8::is_ascii_hexdigit);
-
-	if !valid {
+	if !value.starts_with("0x") || value.parse::<B256>().is_err() {
 		return Err(CoreError::InvalidBlockHash { field });
 	}
 
@@ -168,6 +165,37 @@ mod tests {
 		let error =
 			BlockEvent::new(test_chain_id(), 21_000_000, "0x1234", PARENT_HASH, 1_720_000_000, 150)
 				.expect_err("invalid block hash should fail");
+
+		assert_eq!(error, CoreError::InvalidBlockHash { field: "block_hash" });
+	}
+
+	#[test]
+	fn rejects_unprefixed_block_hash() {
+		let error = BlockEvent::new(
+			test_chain_id(),
+			21_000_000,
+			&BLOCK_HASH[2..],
+			PARENT_HASH,
+			1_720_000_000,
+			150,
+		)
+		.expect_err("unprefixed block hash should fail");
+
+		assert_eq!(error, CoreError::InvalidBlockHash { field: "block_hash" });
+	}
+
+	#[test]
+	fn rejects_non_hex_block_hash() {
+		let invalid_hash = format!("0x{}z", "1".repeat(63));
+		let error = BlockEvent::new(
+			test_chain_id(),
+			21_000_000,
+			invalid_hash,
+			PARENT_HASH,
+			1_720_000_000,
+			150,
+		)
+		.expect_err("non-hex block hash should fail");
 
 		assert_eq!(error, CoreError::InvalidBlockHash { field: "block_hash" });
 	}

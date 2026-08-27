@@ -91,8 +91,11 @@ waiting for handlers, and live outcomes arrive in completion order.
 
 The mailbox is bounded because isolation also means containing an unhealthy
 plugin's memory usage. When one mailbox is full, only that delivery is rejected;
-every sibling mailbox is still attempted. Durable lossless delivery requires a
-separate replay/checkpoint contract rather than an unbounded in-memory queue.
+every sibling mailbox is still attempted. The standalone CLI adds a separate
+at-least-once checkpoint gate: it advances durable progress only after every
+plugin succeeds and replays an unacknowledged event after restart. Embedders
+using `raven-runtime` directly must own an equivalent policy if they require
+durability.
 
 ## Add the right extension
 

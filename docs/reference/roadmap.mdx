@@ -34,45 +34,53 @@ overlap when it does not require an undecided contract.
 - [x] Unique-name plugin registry
 - [x] One independent Tokio worker and bounded FIFO mailbox per plugin
 - [x] Non-blocking fan-out with per-plugin delivery receipts
-- [x] Live success, error, panic, and rejection outcomes in completion order
+- [x] Live success, error, panic, timeout, and rejection outcomes in completion order
 - [x] Handler-error isolation and per-worker panic quarantine
 - [x] Concurrent plugin startup and graceful parallel drain on shutdown
 - [x] Runtime state and event-chain validation
 - [x] Alloy HTTP(S) JSON-RPC block polling
 - [x] Alloy WS(S) `newHeads` subscription with periodic reconciliation
 - [x] Ordered catch-up across blocks missed between polls or notifications
+- [x] Capped retry of transient RPC failures with jitter and telemetry
+- [x] Bounded shallow-reorg detection with revert-before-apply ordering
+- [x] Resume, latest, and inclusive explicit-block start positions
+- [x] CLI-owned atomic per-chain checkpoints after all-plugin success
+- [x] Bounded lifecycle hooks, worker health, and aggregate cleanup errors
 - [x] Persistent RPC URL configuration with CLI and environment precedence
 - [x] RPC-focused `raven run` interface without an implementation-specific source flag
 - [x] Working `raven run` orchestration and Ctrl+C shutdown
 - [x] Built-in block logging
+- [x] `raven doctor` configuration and bounded RPC connectivity checks
 
-## Recommended next milestone: reliable canonical blocks
+## Completed milestone: reliable canonical blocks
 
-Before Raven grows the event enum or ships stateful plugins, make block
-delivery and recovery explicit.
+This milestone made block delivery and recovery explicit before Raven grows
+the event enum or ships stateful plugins.
 
-1. **Define delivery semantics.** Choose and document at-least-once delivery,
-   checkpoint ownership, and when a checkpoint becomes durable.
-2. **Finish lifecycle supervision.** Add startup, handler, and shutdown
-   timeouts; decide restart policy; expose worker health; and report multiple
-   lifecycle failures without abandoning cleanup.
-3. **Add source retry policy.** Categorize transient and terminal RPC failures,
-   use capped exponential backoff with jitter, and expose retry telemetry.
-4. **Add start position and checkpoints.** Support latest, explicit block
-   height, and persisted resume without silently skipping history.
-5. **Detect shallow reorgs.** Maintain a bounded canonical window and emit
-   `BlockReverted` values before replacement `BlockApplied` values.
-6. **Test the contract.** Use deterministic mocked RPC fixtures for missed
-   blocks, temporary omissions, retries, restarts, and competing forks.
+1. [x] **Define delivery semantics.** The CLI provides at-least-once delivery,
+   owns the checkpoint, and commits only after every plugin succeeds.
+2. [x] **Finish lifecycle supervision.** Startup, handler, and shutdown hooks
+   are bounded; panic/timeout quarantines rather than restarts a worker; health
+   is inspectable; cleanup reports all lifecycle failures.
+3. [x] **Add source retry policy.** Transient RPC failures use capped
+   exponential backoff with jitter and structured retry telemetry; terminal
+   failures stop explicitly.
+4. [x] **Add start position and checkpoints.** `resume`, `latest`, and an
+   inclusive block height are supported with atomic per-chain persistence.
+5. [x] **Detect shallow reorgs.** A bounded canonical window emits old blocks
+   as `BlockReverted` before replacement `BlockApplied` values.
+6. [x] **Test the contract.** Deterministic fixtures cover ordered catch-up,
+   competing shallow forks, retry timing/classification, checkpoint restart,
+   timeouts, health, and aggregate cleanup failures.
 
 Exit criteria:
 
-- A restart resumes from a documented checkpoint without an unexplained gap.
-- A tested shallow fork produces reverted blocks followed by replacement blocks
+- [x] A restart resumes from a documented checkpoint without an unexplained gap.
+- [x] A tested shallow fork produces reverted blocks followed by replacement blocks
   in deterministic order.
-- A timed-out or failing lifecycle hook cannot prevent cleanup of other
+- [x] A timed-out or failing lifecycle hook cannot prevent cleanup of other
   plugins.
-- `raven doctor` can check configuration and RPC connectivity without starting
+- [x] `raven doctor` can check configuration and RPC connectivity without starting
   the event loop.
 
 ## Event model and replay
@@ -134,31 +142,37 @@ not-implemented errors until this phase.
 
 - [ ] Build `raven-source-reth` to translate ExEx commit, revert, and reorg
   notifications into the same validated event model.
-- [ ] Package the adapter in a separate, version-pinned Raven-enabled Reth
-  binary that installs the ExEx and launches the node.
+- [ ] Integrate a version-pinned Raven-enabled Reth CLI so its normal node
+  launch (`reth node`) installs the Raven ExEx and starts configured plugins
+  alongside the node; keep standalone `raven run` for JSON-RPC deployments.
 - [ ] Use `ExExContext` node components and providers for additional state
   reads instead of opening an active Reth database from a sidecar process.
+- [ ] Map Raven's all-plugin durable success boundary to
+  `ExExEvent::FinishedHeight`; never acknowledge on enqueue because Reth may
+  prune data below the reported height.
 - [ ] Evaluate a versioned remote-ExEx stream only if Raven needs process
   isolation from Reth; keep it distinct from the standalone RPC path.
 - [ ] Compare Alloy and Reth behavior, then extract a shared source trait if the
   two implementations demonstrate a useful common interface.
 - [x] Use WebSocket subscriptions with ordered height-gap reconciliation.
-- [ ] Define Raven-level terminal reconnect policy and checkpoint-based resume.
-- [ ] Add configurable per-plugin timeouts, restart supervision, health status,
-  and dead-letter handling while preserving current FIFO guarantees.
+- [x] Define Raven-level terminal reconnect policy and checkpoint-based resume.
+- [x] Add configurable per-plugin timeouts, explicit no-auto-restart policy,
+  health status, and aggregate cleanup errors while preserving FIFO guarantees.
+- [ ] Add dead-letter handling if production plugins demonstrate a concrete
+  recovery workflow that checkpoint replay cannot serve.
 - [ ] Add durable queues or a distributed runtime only after profiling shows a
   single process is the limiting boundary.
 
-## Decisions to record before implementation
+## Architecture decisions
 
-| Decision | Why it blocks later work |
+| Decision | Status |
 | --- | --- |
-| At-least-once delivery and checkpoint commit point | Determines replay and plugin idempotency |
-| Reorg depth and finality policy | Determines canonical-state correction |
-| Core versus derived event granularity | Determines source cost and plugin portability |
-| Reth version support policy | Determines how the Raven-enabled node binary is released and upgraded |
-| Plugin timeout and restart policy | Determines supervision and recovery guarantees |
-| Static versus dynamic plugin packaging | Determines security, compatibility, and CLI design |
+| At-least-once delivery and checkpoint commit point | Decided: CLI-owned, after every plugin succeeds |
+| Reorg depth and finality policy | Partly decided: configurable bounded window; finality policy remains open |
+| Core versus derived event granularity | Open; blocks are the only current payload |
+| Reth version support policy | Open; the integrated Reth CLI will be version-pinned |
+| Plugin timeout and restart policy | Decided: bounded hooks, quarantine, no automatic in-process restart |
+| Static versus dynamic plugin packaging | Open; static registration remains the current safe default |
 
 <Note>
 Roadmap items describe direction, not release commitments. Refer to the CLI

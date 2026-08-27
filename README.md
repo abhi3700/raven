@@ -42,12 +42,16 @@ plugins own application logic.
 - Automatic EIP-155 chain discovery with no chain allowlist
 - Runtime state and per-chain validation
 - Transport-aware JSON-RPC ingestion backed by Alloy: HTTP polling or WS subscriptions with reconciliation
+- Capped transient-RPC retry with jitter and structured telemetry
+- Durable per-chain resume, explicit block starts, and bounded shallow-reorg correction
+- At-least-once CLI delivery: checkpoints commit only after every plugin succeeds
+- Bounded plugin lifecycle hooks, worker health, and aggregate cleanup errors
 - Persistent RPC URL configuration with CLI and environment overrides
 - Working CLI orchestration with graceful Ctrl+C shutdown
 - Normalized event boundary designed for future Reth ExEx support
 
-> **Important:** Raven is early-stage. Reorg detection, dynamic plugin
-> installation, and Reth ExEx integration are planned but not yet implemented.
+> **Important:** Raven is early-stage. Dynamic plugin installation and the
+> Raven-enabled Reth CLI/ExEx integration are planned but not yet implemented.
 
 ## Getting started
 
@@ -101,12 +105,20 @@ raven run --rpc-url wss://your-evm-rpc.example
 Resolution order is `--rpc-url`, then `NODE_RPC_URL`, then persisted config.
 Run `raven config clear` to remove the persisted value.
 
-Raven calls `eth_chainId`, accepts any non-zero EIP-155 chain ID, and initializes
-the runtime from the first event. There is no Ethereum-mainnet allowlist. It
+Raven calls `eth_chainId`, accepts any non-zero EIP-155 chain ID, selects that
+chain's durable checkpoint, and initializes the runtime. There is no
+Ethereum-mainnet allowlist. It
 then fetches full blocks, sends normalized events through the runtime, and logs
 each block with the built-in `block-logger` plugin. HTTP(S) polls for new
 heights; WS(S) subscribes to `newHeads` and periodically reconciles missed
 heights. Press Ctrl+C to shut down cleanly.
+
+`raven run` defaults to `--start resume`: it continues after the last event
+successfully handled by every plugin, or starts at the current head when there
+is no checkpoint. Use `--start latest` to ignore saved progress or
+`--start <BLOCK>` to backfill from an inclusive height. Raven retains 64 recent
+canonical blocks by default and delivers shallow-fork reverts before
+replacement blocks.
 
 One Raven process handles one discovered chain so event ordering and plugin
 state cannot accidentally cross chains. Run separate Raven processes to ingest
@@ -136,9 +148,10 @@ local node does not change this data path; the URL scheme selects HTTP polling
 or WebSocket subscription behavior.
 
 Future Reth ExEx support has a different deployment model. An ExEx is compiled
-into and launched with a Reth node, so Raven plans to provide a separate
-Raven-enabled Reth binary rather than pretending it can attach to an existing
-node through a `--source reth` flag.
+into and launched with a Reth node, so Raven plans a version-pinned
+Raven-enabled Reth CLI. Operators will run the normal `reth node` flow with
+Raven/plugin configuration, and the node builder will install Raven in-process.
+It will not pretend to attach through a `--source reth` flag.
 
 ## Write a plugin
 
@@ -230,14 +243,15 @@ mint validate
 
 ## Roadmap
 
-The next milestone focuses on correctness before expanding the plugin catalog:
+The reliability milestone is complete. The next product milestone is the first
+production-shaped plugin, while Reth integration can proceed against the now
+explicit acknowledgement contract:
 
-- Delivery semantics and durable checkpoint ownership
-- Lifecycle timeouts, worker health, restart supervision, and multi-error reporting
-- Retry and backoff for transient RPC failures
-- Historical starting-block and resume configuration
-- Reorg-aware applied and reverted block events
 - A large ERC-20 transfer plugin as the first vertical slice
+- Typed plugin configuration and a production output sink
+- A `raven-source-reth` adapter for commit/revert/reorg notifications
+- A version-pinned Raven-enabled Reth CLI that installs the ExEx during
+  `reth node` launch
 
 See the [full roadmap](./docs/reference/roadmap.mdx) for implemented and planned
 capabilities, exit criteria, and later Reth/plugin-platform work.
