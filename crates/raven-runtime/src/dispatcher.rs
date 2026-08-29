@@ -183,7 +183,9 @@ impl Dispatcher {
 	///
 	/// This method is intentionally synchronous and non-blocking. Each mailbox is
 	/// attempted with `try_send`, so a full or stopped plugin cannot delay sibling
-	/// delivery attempts.
+	/// delivery attempts. Acceptance depends on free mailbox capacity, not on the
+	/// worker being idle: a later event can wait in FIFO order while the plugin is
+	/// still awaiting its previous `handle_event` call.
 	///
 	/// ```text
 	/// ChainEvent

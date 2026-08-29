@@ -892,6 +892,54 @@ mod tests {
 	}
 
 	#[tokio::test]
+	async fn queues_later_events_while_a_plugin_awaits_the_first_one() {
+		let entered = Arc::new(Notify::new());
+		let release = Arc::new(Notify::new());
+		let mut runtime = Runtime::with_plugin_mailbox_capacity(test_chain_id(), 3)
+			.expect("positive capacity should be valid");
+		let mut outcomes = runtime.subscribe_outcomes();
+
+		runtime
+			.register_plugin(GatePlugin {
+				name: "waiting",
+				entered: Arc::clone(&entered),
+				release: Arc::clone(&release),
+				block_next_event: true,
+			})
+			.expect("waiting plugin should register");
+		runtime.start().await.expect("runtime should start");
+
+		let first = runtime.process(event_at(1)).await.expect("first dispatch should succeed");
+		entered.notified().await;
+
+		let mut receipts = vec![first];
+		for block_number in 2..=4 {
+			let receipt = runtime
+				.process(event_at(block_number))
+				.await
+				.expect("queued dispatch should succeed");
+			assert_eq!(delivery_status(&receipt, "waiting"), PluginDeliveryStatus::Accepted);
+			receipts.push(receipt);
+		}
+
+		assert!(
+			timeout(Duration::from_millis(20), outcomes.recv()).await.is_err(),
+			"queued events must not run while the first handler is awaiting"
+		);
+
+		release.notify_one();
+
+		for (expected_block, receipt) in (1..=4).zip(receipts) {
+			let outcome = next_outcome(&mut outcomes).await;
+			assert_eq!(outcome.dispatch_id(), receipt.dispatch_id());
+			assert_eq!(outcome.event().block_number(), expected_block);
+			assert!(matches!(outcome.status(), PluginOutcomeStatus::Succeeded));
+		}
+
+		runtime.shutdown().await.expect("runtime should shut down");
+	}
+
+	#[tokio::test]
 	async fn plugin_panic_quarantines_only_that_worker_and_accounts_for_queued_events() {
 		let entered = Arc::new(Notify::new());
 		let release = Arc::new(Notify::new());

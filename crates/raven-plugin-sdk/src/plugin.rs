@@ -79,6 +79,18 @@ mod tests {
 		.expect("block should be valid")
 	}
 
+	fn block_event2() -> BlockEvent {
+		BlockEvent::new(
+			ChainId::new(8_453).expect("test chain ID should be valid"),
+			21_000_001,
+			"0x1111111111111111111111111111111111111111111111111111111111111111",
+			"0x2222222222222222222222222222222222222222222222222222222222222222",
+			1_720_000_001,
+			150,
+		)
+		.expect("block should be valid")
+	}
+
 	#[tokio::test]
 	async fn runs_plugin_lifecycle() {
 		let context =
@@ -95,6 +107,29 @@ mod tests {
 		assert!(plugin.started);
 		assert!(plugin.stopped);
 		assert_eq!(plugin.handled_events, 1);
+	}
+
+	#[tokio::test]
+	async fn runs_plugin_lifecycle_w_more_events() {
+		let context =
+			PluginContext::new(ChainId::new(8_453).expect("test chain ID should be valid"));
+		let event = ChainEvent::BlockApplied(block_event());
+		let event2 = ChainEvent::BlockApplied(block_event2());
+		let mut plugin = TestPlugin::new();
+
+		plugin.start(&context).await.expect("plugin should start");
+
+		plugin.handle_event(&event, &context).await.expect("plugin should handle event");
+		plugin
+			.handle_event(&event2, &context)
+			.await
+			.expect("plugin should handle event");
+
+		plugin.shutdown(&context).await.expect("plugin should stop");
+
+		assert!(plugin.started);
+		assert!(plugin.stopped);
+		assert_eq!(plugin.handled_events, 2);
 	}
 
 	#[test]

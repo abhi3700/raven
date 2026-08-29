@@ -330,6 +330,61 @@ Each mailbox is a bounded Tokio `mpsc` channel. This gives two properties:
 Raven uses `Arc<ChainEvent>` for fan-out so each mailbox receives cheap shared
 ownership instead of deeply cloning the event payload.
 
+## When a worker receives the next event
+
+`Runtime::process` does not wait for a plugin worker to become idle. It attempts
+to enqueue the event in every active plugin mailbox. A mailbox accepts the event
+when it has capacity, even if its worker is still handling an earlier event.
+
+An `await` inside `handle_event` yields Tokio's executor so other tasks can run,
+but it does not make that plugin worker idle. The worker is still responsible
+for the earlier event and cannot call its next `recv()` until that handler
+returns. A direct runtime caller can therefore queue `E2`, `E3`, and `E4`
+behind an in-flight `E1`, but their handlers never overlap:
+
+```text
+E1 -> mailbox -> worker handles E1 and awaits I/O
+                  mailbox FIFO: [E2, E3, E4]
+
+E1 handler returns
+  -> worker broadcasts E1 outcome
+  -> worker receives E2
+  -> worker handles E2
+  -> worker broadcasts E2 outcome
+  -> worker receives E3
+  -> ...
+```
+
+This is why delivery acceptance is not handler completion. A full mailbox
+rejects the later event; an accepted event runs later in FIFO order.
+
+## Standalone CLI ordering
+
+The standalone `raven run` loop adds a stricter checkpoint gate. It receives
+one `ChainEvent`, dispatches it, waits for every accepted plugin outcome to
+succeed, and saves the checkpoint before reading and dispatching the next event:
+
+```text
+source -> CLI event buffer -> E1
+                         |
+                         v
+                 Runtime::process(E1)
+                         |
+                         v
+              wait for all E1 outcomes
+                         |
+                         v
+                 save E1 checkpoint
+                         |
+                         v
+             receive and dispatch E2
+```
+
+The source can buffer later chain events while the CLI waits, but the CLI does
+not call `Runtime::process(E2)` until every `E1` plugin has succeeded and the
+checkpoint is durable. If any `E1` delivery or outcome fails, it stops instead
+of dispatching `E2`.
+
 ## Backpressure behavior
 
 Dispatcher fan-out uses `try_send`, not `send(...).await`.

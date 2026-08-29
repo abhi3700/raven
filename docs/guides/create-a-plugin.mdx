@@ -127,9 +127,10 @@ cargo run -p raven-plugin-sdk --example block_logger
 - Keep metadata names stable and unique.
 - Match only the event variants the plugin understands.
 - Keep `handle_event` bounded. Events are sequential inside one plugin, while
-  different plugins run concurrently. Event `E2` will not start in your plugin
-  until its `E1` handler finishes, but another plugin may already be processing
-  or finishing `E2`.
+  different plugins run concurrently. A direct runtime caller can queue `E2`
+  while your plugin awaits `E1`, but `E2` will not start until the `E1` handler
+  finishes and its outcome is published. Another plugin may already be
+  processing or finishing `E2`.
 - Use async clients for I/O. Move blocking or CPU-heavy work to
   `tokio::task::spawn_blocking` or a dedicated compute pool.
 - Expect bounded-mailbox overload and make stateful processing idempotent in
