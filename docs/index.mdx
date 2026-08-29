@@ -54,6 +54,11 @@ runtime owns lifecycle and dispatch. Plugins own application behavior.
 - Normalize blocks into source-independent `ChainEvent` values.
 - Persist an RPC URL and override it through the environment or run command.
 - Register plugins by unique name and run their lifecycle.
+- Extend one per-chain runtime with many custom plugins for tracking, automation,
+  and notifications without changing Raven internals. Plugins can remain private
+  Rust crates or be published for reuse; the host application registers each
+  compiled plugin before startup, and each runs on an independent bounded FIFO
+  worker.
 - Reject events whose chain ID does not match the active runtime.
 - Bound plugin lifecycle hooks, expose worker health, and shut down cleanly.
 
