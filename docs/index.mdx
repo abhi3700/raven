@@ -25,6 +25,13 @@ delivers those events to reusable plugins.
   </Card>
 </CardGroup>
 
+## Terminology legend
+
+| Term | Meaning in these docs |
+| --- | --- |
+| **Contract** | A software interface, rule, or behavioral guarantee between Raven components, such as the Plugin API or dispatch guarantees. It does not mean an EVM smart contract. |
+| **Smart contract** | An EVM program deployed onchain. References to this meaning always say **smart contract** explicitly. |
+
 ## Why Raven?
 
 Most blockchain applications repeatedly poll RPC endpoints and rebuild the same
@@ -71,6 +78,6 @@ plugin installation are planned, not yet implemented.
 
 > Everything is an event.
 
-Blocks, transfers, swaps, liquidations, and contract deployments can all become
-events. Raven keeps transport concerns out of plugins so a plugin can work with
-multiple event sources without changing its business logic.
+Blocks, transfers, swaps, liquidations, and smart-contract deployments can all
+become events. Raven keeps transport concerns out of plugins so a plugin can
+work with multiple event sources without changing its business logic.
