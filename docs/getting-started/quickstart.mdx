@@ -89,6 +89,23 @@ matching applied transfers through tracing. If a retained block is removed by a
 shallow reorg, Raven sends the same log payload as `BlockReverted` and the plugin
 reports those matches with `action=reverted`.
 
+## Monitor shallow reorgs
+
+Enable the statically linked reorg monitor to make each normalized chain
+transition visible in terminal tracing:
+
+```bash
+raven run \
+  --rpc-url http://localhost:8545 \
+  --reorg-monitor
+```
+
+Applied blocks are reported at `INFO`. When the source removes a retained block
+after a shallow fork, the monitor reports the corresponding `BlockReverted` at
+`WARN`, before logging the replacement `BlockApplied` blocks. It consumes the
+same normalized events as every other plugin and makes no RPC calls. See the
+[reorg monitor plugin](/docs/plugins/reorg-monitor) for the exact sequence.
+
 There is no `--source alloy` option. Alloy is the current Rust implementation
 of RPC ingestion, not a deployment choice. Raven infers HTTP polling versus
 WebSocket subscriptions from the endpoint scheme.

@@ -80,6 +80,10 @@ pub(crate) struct RunArgs {
 	#[arg(long, value_enum, default_value = "batch")]
 	pub(crate) block_fetch_mode: BlockFetchModeArg,
 
+	/// Report applied and reverted blocks to make shallow reorgs visible.
+	#[arg(long)]
+	pub(crate) reorg_monitor: bool,
+
 	/// Enable ERC-20 monitoring with one shared threshold or one threshold per token.
 	#[arg(long, num_args = 1.., value_name = "RAW_UNITS", value_parser = parse_positive_u256)]
 	pub(crate) erc20_transfer_min_amount: Option<Vec<U256>>,
@@ -231,6 +235,7 @@ mod tests {
 		assert_eq!(args.start, StartArg::Resume);
 		assert_eq!(args.reorg_depth, 64);
 		assert_eq!(args.block_fetch_mode, BlockFetchModeArg::Batch);
+		assert!(!args.reorg_monitor);
 		assert!(args.erc20_transfer_min_amount.is_none());
 		assert!(args.erc20_token.is_empty());
 	}
@@ -243,6 +248,14 @@ mod tests {
 
 		assert_eq!(args.block_fetch_mode, BlockFetchModeArg::Sequential);
 		assert_eq!(BlockFetchMode::from(args.block_fetch_mode), BlockFetchMode::Sequential);
+	}
+
+	#[test]
+	fn enables_reorg_monitor() {
+		let cli = Cli::try_parse_from(["raven", "run", "--reorg-monitor"]).unwrap();
+		let Some(Command::Run(args)) = cli.command else { panic!("run expected") };
+
+		assert!(args.reorg_monitor);
 	}
 
 	#[test]

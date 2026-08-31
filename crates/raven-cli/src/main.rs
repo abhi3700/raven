@@ -97,6 +97,8 @@ fn built_in_plugin(name: &str) -> Option<&'static str> {
 		Some("block-logger")
 	} else if matches!(name, "erc20-transfer" | "erc20transfer") {
 		Some("erc20-transfer")
+	} else if matches!(name, "reorg-monitor" | "reorgmonitor") {
+		Some("reorg-monitor")
 	} else {
 		None
 	}
@@ -136,6 +138,7 @@ mod tests {
 	fn recognizes_built_in_plugins() {
 		assert_eq!(built_in_plugin("blocklogger"), Some("block-logger"));
 		assert_eq!(built_in_plugin("erc20-transfer"), Some("erc20-transfer"));
+		assert_eq!(built_in_plugin("reorgmonitor"), Some("reorg-monitor"));
 		assert_eq!(built_in_plugin("whale-detector"), None);
 	}
 }

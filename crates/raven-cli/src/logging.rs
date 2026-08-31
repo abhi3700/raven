@@ -1,9 +1,20 @@
 use std::{borrow::Cow, fmt};
 
-use tracing::field::{Field, Visit};
+use tracing::{
+	Event, Subscriber,
+	field::{Field, Visit},
+	span::{Attributes, Id},
+};
 use tracing_subscriber::{
 	field::RecordFields,
-	fmt::format::{FormatFields, Writer},
+	fmt::{
+		FmtContext,
+		format::{FormatEvent, FormatFields, Writer},
+		time::{FormatTime, SystemTime},
+	},
+	layer::{Context, Layer},
+	prelude::*,
+	registry::LookupSpan,
 };
 
 const RESET: &str = "\x1b[0m";
@@ -16,17 +27,246 @@ const FALSE_VALUE: &str = "\x1b[91m";
 const HASH_VALUE: &str = "\x1b[95m";
 const ERROR_VALUE: &str = "\x1b[91m";
 
+const PLUGIN_SPAN_NAME: &str = "raven.plugin";
+const DEFAULT_LOG_FILTER: &str = "raven=info,raven_plugin_=info,raven_source_alloy=info";
+
+/// Terminal color assigned by the CLI when a plugin is registered.
+///
+/// Consecutive registrations walk the color wheel using a coprime stride, so the
+/// first 360 plugins receive distinct hues while the assignment remains stable
+/// for the same registration order across process restarts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct PluginColor {
+	red: u8,
+	green: u8,
+	blue: u8,
+}
+
+impl PluginColor {
+	fn from_registration(index: u32) -> Self {
+		const HUE_OFFSET: u32 = 210;
+		const HUE_STRIDE: u32 = 137;
+
+		let hue = (HUE_OFFSET + index.wrapping_mul(HUE_STRIDE)) % 360;
+		let sector = hue / 60;
+		let fraction = hue % 60;
+		let rising = (fraction * 255 / 60) as u8;
+		let falling = 255 - rising;
+		let (red, green, blue) = match sector {
+			0 => (255, rising, 0),
+			1 => (falling, 255, 0),
+			2 => (0, 255, rising),
+			3 => (0, falling, 255),
+			4 => (rising, 0, 255),
+			_ => (255, 0, falling),
+		};
+
+		Self { red, green, blue }
+	}
+
+	const fn encoded(self) -> u64 {
+		((self.red as u64) << 16) | ((self.green as u64) << 8) | self.blue as u64
+	}
+
+	const fn from_encoded(encoded: u64) -> Option<Self> {
+		if encoded > 0x00ff_ffff {
+			return None;
+		}
+
+		Some(Self { red: (encoded >> 16) as u8, green: (encoded >> 8) as u8, blue: encoded as u8 })
+	}
+}
+
+/// Allocates stable, distinct terminal colors as plugins are registered.
+#[derive(Debug, Default)]
+pub(crate) struct PluginColorAllocator {
+	next: u32,
+}
+
+impl PluginColorAllocator {
+	pub(crate) fn assign(&mut self) -> PluginColor {
+		let color = PluginColor::from_registration(self.next);
+		self.next = self.next.wrapping_add(1);
+		color
+	}
+}
+
+/// Plugin identity carried by a tracing span around each plugin lifecycle call.
+#[derive(Debug, Clone)]
+pub(crate) struct PluginLogIdentity {
+	name: String,
+	color: PluginColor,
+}
+
+impl PluginLogIdentity {
+	pub(crate) fn new(name: impl Into<String>, color: PluginColor) -> Self {
+		Self { name: name.into(), color }
+	}
+}
+
+/// Creates the tracing context used by the CLI's plugin wrapper.
+///
+/// The error span level keeps this context enabled whenever a plugin event can
+/// be emitted by the configured `RUST_LOG` filter, including warnings when
+/// informational logs are suppressed.
+pub(crate) fn plugin_span(identity: &PluginLogIdentity) -> tracing::Span {
+	tracing::span!(
+		target: "raven::plugin",
+		tracing::Level::ERROR,
+		PLUGIN_SPAN_NAME,
+		plugin_name = identity.name.as_str(),
+		plugin_color = identity.color.encoded(),
+	)
+}
+
 #[derive(Debug, Default)]
 struct RavenFields;
 
 pub(crate) fn init() {
-	tracing_subscriber::fmt()
-		.fmt_fields(RavenFields)
-		.with_env_filter(
-			tracing_subscriber::EnvFilter::try_from_default_env()
-				.unwrap_or_else(|_| "raven=info,raven_source_alloy=info".into()),
+	let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+		.unwrap_or_else(|_| DEFAULT_LOG_FILTER.into());
+
+	tracing_subscriber::registry()
+		.with(PluginSpanLayer)
+		.with(
+			tracing_subscriber::fmt::layer()
+				.fmt_fields(RavenFields)
+				.event_format(RavenEventFormatter)
+				.with_filter(filter),
 		)
 		.init();
+}
+
+/// Stores plugin identity in tracing span extensions for terminal formatting.
+#[derive(Debug, Default)]
+struct PluginSpanLayer;
+
+impl<S> Layer<S> for PluginSpanLayer
+where
+	S: Subscriber + for<'lookup> LookupSpan<'lookup>,
+{
+	fn on_new_span(&self, attributes: &Attributes<'_>, id: &Id, context: Context<'_, S>) {
+		if attributes.metadata().name() != PLUGIN_SPAN_NAME {
+			return;
+		}
+
+		let mut visitor = PluginSpanVisitor::default();
+		attributes.record(&mut visitor);
+		let Some(identity) = visitor.into_identity() else { return };
+		let Some(span) = context.span(id) else { return };
+
+		span.extensions_mut().insert(identity);
+	}
+}
+
+#[derive(Debug, Default)]
+struct PluginSpanVisitor {
+	name: Option<String>,
+	color: Option<PluginColor>,
+}
+
+impl PluginSpanVisitor {
+	fn into_identity(self) -> Option<PluginLogIdentity> {
+		Some(PluginLogIdentity::new(self.name?, self.color?))
+	}
+}
+
+impl Visit for PluginSpanVisitor {
+	fn record_str(&mut self, field: &Field, value: &str) {
+		if field.name() == "plugin_name" {
+			self.name = Some(value.to_owned());
+		}
+	}
+
+	fn record_u64(&mut self, field: &Field, value: u64) {
+		if field.name() == "plugin_color" {
+			self.color = PluginColor::from_encoded(value);
+		}
+	}
+
+	fn record_debug(&mut self, _field: &Field, _value: &dyn fmt::Debug) {}
+}
+
+/// Formats a compact, colored plugin tag before plugin-originated log events.
+///
+/// The default `tracing-subscriber` full formatter renders span fields inline,
+/// which would repeat implementation-only span metadata on every event. This
+/// formatter reads only Raven's plugin span extension and leaves all other
+/// source/runtime events in the existing timestamp, level, target, and field
+/// layout.
+#[derive(Debug, Default)]
+struct RavenEventFormatter;
+
+impl<S, N> FormatEvent<S, N> for RavenEventFormatter
+where
+	S: Subscriber + for<'lookup> LookupSpan<'lookup>,
+	N: for<'writer> FormatFields<'writer> + 'static,
+{
+	fn format_event(
+		&self,
+		context: &FmtContext<'_, S, N>,
+		mut writer: Writer<'_>,
+		event: &Event<'_>,
+	) -> fmt::Result {
+		SystemTime.format_time(&mut writer)?;
+		writer.write_char(' ')?;
+		write_level(&mut writer, *event.metadata().level())?;
+		writer.write_char(' ')?;
+
+		if let Some(identity) = plugin_identity(context) {
+			write_plugin_tag(&mut writer, &identity)?;
+			writer.write_char(' ')?;
+		}
+
+		let target = event.metadata().target();
+		if writer.has_ansi_escapes() {
+			write!(writer, "{FIELD_KEY}{target}{RESET}{FIELD_EQUALS}:{RESET} ")?;
+		} else {
+			write!(writer, "{target}: ")?;
+		}
+		context.format_fields(writer.by_ref(), event)?;
+		writeln!(writer)
+	}
+}
+
+fn plugin_identity<S, N>(context: &FmtContext<'_, S, N>) -> Option<PluginLogIdentity>
+where
+	S: Subscriber + for<'lookup> LookupSpan<'lookup>,
+	N: for<'writer> FormatFields<'writer> + 'static,
+{
+	context.event_scope().and_then(|scope| {
+		scope
+			.from_root()
+			.find_map(|span| span.extensions().get::<PluginLogIdentity>().cloned())
+	})
+}
+
+fn write_level(writer: &mut Writer<'_>, level: tracing::Level) -> fmt::Result {
+	let level = format!("{level:>5}");
+	if !writer.has_ansi_escapes() {
+		return writer.write_str(&level);
+	}
+
+	let color = match level.trim() {
+		"ERROR" => "\x1b[31m",
+		"WARN" => "\x1b[33m",
+		"INFO" => "\x1b[32m",
+		"DEBUG" => "\x1b[34m",
+		_ => "\x1b[35m",
+	};
+	write!(writer, "{color}{level}{RESET}")
+}
+
+fn write_plugin_tag(writer: &mut Writer<'_>, identity: &PluginLogIdentity) -> fmt::Result {
+	if !writer.has_ansi_escapes() {
+		return write!(writer, "[ {} ]", identity.name);
+	}
+
+	write!(
+		writer,
+		"\x1b[1;38;2;{};{};{}m[ {} ]{RESET}",
+		identity.color.red, identity.color.green, identity.color.blue, identity.name
+	)
 }
 
 impl<'writer> FormatFields<'writer> for RavenFields {
@@ -226,15 +466,81 @@ mod tests {
 		assert!(output.contains("\\x1b[31mevil"));
 	}
 
+	#[test]
+	fn prefixes_plugin_events_with_a_color_coded_name_tag() {
+		let output = capture_log(true, || {
+			let mut colors = PluginColorAllocator::default();
+			let identity = PluginLogIdentity::new("erc20-transfer", colors.assign());
+			let span = plugin_span(&identity);
+			let _guard = span.enter();
+			tracing::info!("large transfer detected");
+		});
+
+		assert!(output.contains("\x1b[1;38;2;"));
+		assert!(output.contains("[ erc20-transfer ]"));
+	}
+
+	#[test]
+	fn preserves_plugin_name_tags_without_ansi() {
+		let output = capture_log(false, || {
+			let mut colors = PluginColorAllocator::default();
+			let identity = PluginLogIdentity::new("reorg-monitor", colors.assign());
+			let span = plugin_span(&identity);
+			let _guard = span.enter();
+			tracing::warn!("block reverted");
+		});
+
+		assert!(!output.contains("\x1b["));
+		assert!(output.contains("[ reorg-monitor ]"));
+	}
+
+	#[test]
+	fn allocates_distinct_hues_for_the_first_360_plugins() {
+		let mut colors = PluginColorAllocator::default();
+		let allocated: std::collections::HashSet<_> = (0..360).map(|_| colors.assign()).collect();
+
+		assert_eq!(allocated.len(), 360);
+	}
+
+	#[test]
+	fn default_filter_emits_packaged_plugin_events() {
+		let output = capture_default_filtered_log(false, || {
+			let mut colors = PluginColorAllocator::default();
+			let identity = PluginLogIdentity::new("erc20-transfer", colors.assign());
+			let span = plugin_span(&identity);
+			let _guard = span.enter();
+			tracing::info!(target: "raven_plugin_erc20_transfer", "large transfer detected");
+		});
+
+		assert!(output.contains("[ erc20-transfer ]"));
+		assert!(output.contains("large transfer detected"));
+	}
+
 	fn capture_log(ansi: bool, emit: impl FnOnce()) -> String {
 		let buffer = SharedBuffer::default();
-		let subscriber = tracing_subscriber::fmt()
-			.with_ansi(ansi)
-			.without_time()
-			.with_target(false)
-			.fmt_fields(RavenFields)
-			.with_writer(buffer.clone())
-			.finish();
+		let subscriber = tracing_subscriber::registry().with(PluginSpanLayer).with(
+			tracing_subscriber::fmt::layer()
+				.with_ansi(ansi)
+				.fmt_fields(RavenFields)
+				.event_format(RavenEventFormatter)
+				.with_writer(buffer.clone()),
+		);
+
+		tracing::subscriber::with_default(subscriber, emit);
+		buffer.contents()
+	}
+
+	fn capture_default_filtered_log(ansi: bool, emit: impl FnOnce()) -> String {
+		let buffer = SharedBuffer::default();
+		let filter = tracing_subscriber::EnvFilter::try_new(DEFAULT_LOG_FILTER).unwrap();
+		let subscriber = tracing_subscriber::registry().with(PluginSpanLayer).with(
+			tracing_subscriber::fmt::layer()
+				.with_ansi(ansi)
+				.fmt_fields(RavenFields)
+				.event_format(RavenEventFormatter)
+				.with_writer(buffer.clone())
+				.with_filter(filter),
+		);
 
 		tracing::subscriber::with_default(subscriber, emit);
 		buffer.contents()

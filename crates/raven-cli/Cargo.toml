@@ -18,6 +18,7 @@ clap.workspace = true
 colored.workspace = true
 raven-core = { path = "../raven-core" }
 raven-plugin-erc20-transfer = { path = "../plugins/erc20-transfer" }
+raven-plugin-reorg-monitor = { path = "../plugins/reorg-monitor" }
 raven-plugin-sdk = { path = "../raven-plugin-sdk" }
 raven-runtime = { path = "../raven-runtime" }
 raven-source-alloy = { path = "../raven-source-alloy" }

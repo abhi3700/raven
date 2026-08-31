@@ -17,6 +17,7 @@ contribution, validation, and pull request workflow.
 | --- | --- | --- |
 | `raven-core` | Library | Validated, source-independent chain types |
 | `raven-plugin-erc20-transfer` | Library | Static large ERC-20 transfer detection plugin in `crates/plugins/erc20-transfer` |
+| `raven-plugin-reorg-monitor` | Library | Static canonical-chain transition monitor in `crates/plugins/reorg-monitor` |
 | `raven-plugin-sdk` | Library | Plugin trait, context, metadata, and errors |
 | `raven-runtime` | Library | Plugin registration, lifecycle, validation, and dispatch |
 | `raven-source-alloy` | Library | Alloy-backed JSON-RPC polling, WS subscriptions, reconciliation, and normalization |
@@ -49,6 +50,17 @@ logs. It can filter token contract addresses and uses an inclusive raw-unit
 amount threshold. It intentionally has no RPC dependency. See the
 [ERC-20 transfer plugin guide](/docs/plugins/erc20-transfer) for configuration,
 matching, reorg, and delivery semantics.
+
+## `raven-plugin-reorg-monitor`
+
+Public export:
+
+- `ReorgMonitorPlugin`
+
+This stateless plugin reports normalized `BlockApplied` and `BlockReverted`
+events through tracing. It has no RPC dependency and relies on the source's
+validated reorg ordering. See the [reorg monitor plugin guide](/docs/plugins/reorg-monitor)
+for terminal output and correction semantics.
 
 ## `raven-plugin-sdk`
 

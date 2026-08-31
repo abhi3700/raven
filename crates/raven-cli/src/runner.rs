@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use eyre::{Result, WrapErr, bail};
 use raven_core::ChainEvent;
 use raven_plugin_erc20_transfer::{Erc20TransferConfig, Erc20TransferPlugin};
+use raven_plugin_reorg_monitor::ReorgMonitorPlugin;
 use raven_plugin_sdk::{Plugin, PluginContext, PluginMetadata, PluginResult};
 use raven_runtime::{DispatchReceipt, PluginOutcome, PluginOutcomeStatus, Runtime};
 use raven_source_alloy::{AlloySource, SourceStart, inspect_rpc_endpoint};
@@ -11,11 +12,12 @@ use tokio::{
 	sync::{broadcast, mpsc},
 	task::JoinHandle,
 };
-use tracing::{debug, error, info, warn};
+use tracing::{Instrument, debug, error, info, warn};
 
 use crate::{
 	checkpoint::Checkpoint,
 	cli::{RunArgs, StartArg},
+	logging::{PluginColor, PluginColorAllocator, PluginLogIdentity, plugin_span},
 };
 
 const EVENT_CHANNEL_CAPACITY: usize = 256;
@@ -31,9 +33,13 @@ pub(crate) async fn run(args: RunArgs, rpc_url: String) -> Result<()> {
 	let (source_start, mut checkpoint) = resolve_start(&args, endpoint.chain_id)?;
 
 	let mut runtime = Runtime::new(endpoint.chain_id);
-	runtime.register_plugin(BlockLoggerPlugin)?;
+	let mut plugin_colors = PluginColorAllocator::default();
+	register_cli_plugin(&mut runtime, &mut plugin_colors, BlockLoggerPlugin)?;
+	if args.reorg_monitor {
+		register_cli_plugin(&mut runtime, &mut plugin_colors, ReorgMonitorPlugin::new())?;
+	}
 	if let Some(config) = erc20_transfer_config {
-		runtime.register_plugin(Erc20TransferPlugin::new(config))?;
+		register_cli_plugin(&mut runtime, &mut plugin_colors, Erc20TransferPlugin::new(config))?;
 	}
 	let outcomes = runtime.subscribe_outcomes();
 	runtime.start().await?;
@@ -293,6 +299,67 @@ struct RuntimeSession {
 enum EventLoopExit {
 	Interrupted,
 	SourceStopped,
+}
+
+/// Adds CLI-owned tracing identity around a plugin without changing its SDK contract.
+///
+/// ```text
+/// registered Plugin -> assigned terminal color -> CliPlugin span -> plugin tracing event
+///                                                               -> [ plugin-name ] terminal tag
+/// ```
+fn register_cli_plugin<P>(
+	runtime: &mut Runtime,
+	plugin_colors: &mut PluginColorAllocator,
+	plugin: P,
+) -> Result<()>
+where
+	P: Plugin + 'static,
+{
+	runtime.register_plugin(CliPlugin::new(plugin, plugin_colors.assign()))?;
+	Ok(())
+}
+
+/// CLI adapter that associates one terminal color with every plugin lifecycle call.
+struct CliPlugin<P> {
+	inner: P,
+	metadata: PluginMetadata,
+	log_identity: PluginLogIdentity,
+}
+
+impl<P> CliPlugin<P>
+where
+	P: Plugin,
+{
+	fn new(plugin: P, color: PluginColor) -> Self {
+		let metadata = plugin.metadata();
+		let log_identity = PluginLogIdentity::new(metadata.name, color);
+		Self { inner: plugin, metadata, log_identity }
+	}
+}
+
+#[async_trait]
+impl<P> Plugin for CliPlugin<P>
+where
+	P: Plugin + 'static,
+{
+	fn metadata(&self) -> PluginMetadata {
+		self.metadata
+	}
+
+	async fn start(&mut self, context: &PluginContext) -> PluginResult {
+		self.inner.start(context).instrument(plugin_span(&self.log_identity)).await
+	}
+
+	async fn handle_event(&mut self, event: &ChainEvent, context: &PluginContext) -> PluginResult {
+		self.inner
+			.handle_event(event, context)
+			.instrument(plugin_span(&self.log_identity))
+			.await
+	}
+
+	async fn shutdown(&mut self, context: &PluginContext) -> PluginResult {
+		self.inner.shutdown(context).instrument(plugin_span(&self.log_identity)).await
+	}
 }
 
 /// Built-in plugin that makes the default CLI useful without external plugins.

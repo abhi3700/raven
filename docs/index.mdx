@@ -26,6 +26,9 @@ delivers those events to reusable plugins.
   <Card title="ERC-20 transfer plugin" icon="arrow-right-left" href="/docs/plugins/erc20-transfer">
     Detect configured large token transfers and handle shallow-reorg corrections.
   </Card>
+  <Card title="Reorg monitor plugin" icon="git-compare-arrows" href="/docs/plugins/reorg-monitor">
+    Observe applied and reverted blocks as canonical-chain transitions.
+  </Card>
   <Card title="Contribute to Raven" icon="code-2" href="/docs/development/contributing">
     Learn Raven, build and test a plugin, and submit it for review.
   </Card>
@@ -69,6 +72,8 @@ runtime owns lifecycle and dispatch. Plugins own application behavior.
   hashes, byte payloads, and ERC-20 amounts.
 - Enable the built-in large ERC-20 transfer monitor with raw-unit and token-contract
   filters; reverted blocks emit matching correction telemetry.
+- Enable the built-in reorg monitor to observe every applied and reverted block
+  transition through terminal tracing.
 - Persist an RPC URL and override it through the environment or run command.
 - Register plugins by unique name and run their lifecycle.
 - Extend one per-chain runtime with many custom plugins for tracking, automation,

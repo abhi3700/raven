@@ -50,6 +50,8 @@ plugins own application logic.
 - Persistent RPC URL configuration with CLI and environment overrides
 - Working CLI orchestration with graceful Ctrl+C shutdown
 - Opt-in built-in monitoring for large ERC-20 transfers, including reorg corrections
+- Opt-in built-in reorg monitoring for applied and reverted canonical blocks
+- Color-coded plugin identity tags for readable multi-plugin terminal output
 - Normalized event boundary designed for future Reth ExEx support
 
 > **Important:** Raven is early-stage. Dynamic plugin installation and the
@@ -141,6 +143,27 @@ positionally paired thresholds. Raven does not guess token decimals. Applied
 matches are logged as detections; a shallow reorg logs the corresponding
 transfers as reverted from the same retained block payload.
 
+Enable the reorg monitor to report every applied/reverted transition from the
+same normalized event stream:
+
+```bash
+raven run \
+  --rpc-url http://localhost:8545 \
+  --reorg-monitor
+```
+
+Applied blocks log at `INFO`; reverted blocks log at `WARN` with their hashes,
+so replacement blocks at the same heights remain distinguishable. The monitor
+does not make RPC calls or infer forks itself. It observes the source's bounded
+shallow-reorg correction sequence: old-tip reverts first, then replacement
+applies.
+
+When multiple plugins are enabled, events emitted inside each plugin's
+lifecycle are prefixed with a color-coded `[ plugin-name ]` terminal tag. Raven
+assigns colors as plugins are registered, so the tag makes interleaved block,
+transaction, and log observations attributable without changing plugin code.
+The plain tag remains when `NO_COLOR` is set or output is redirected.
+
 One Raven process handles one discovered chain so event ordering and plugin
 state cannot accidentally cross chains. Run separate Raven processes to ingest
 multiple EVM chains concurrently.
@@ -220,6 +243,7 @@ raven/
 ├── crates/
 │   ├── raven-cli/           # CLI and source/runtime orchestration
 │   ├── raven-core/          # Validated normalized chain events
+│   ├── plugins/             # Statically linked plugin crates
 │   ├── raven-plugin-sdk/    # Plugin contract and context
 │   ├── raven-runtime/       # Registry, lifecycle, and dispatcher
 │   └── raven-source-alloy/  # Alloy-backed HTTP/WebSocket JSON-RPC source

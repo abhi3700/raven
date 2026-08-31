@@ -3257,6 +3257,7 @@ dependencies = [
  "eyre",
  "raven-core",
  "raven-plugin-erc20-transfer",
+ "raven-plugin-reorg-monitor",
  "raven-plugin-sdk",
  "raven-runtime",
  "raven-source-alloy",
@@ -3288,6 +3289,18 @@ dependencies = [
  "raven-core",
  "raven-plugin-sdk",
  "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "raven-plugin-reorg-monitor"
+version = "0.1.0"
+dependencies = [
+ "alloy-primitives",
+ "async-trait",
+ "raven-core",
+ "raven-plugin-sdk",
  "tokio",
  "tracing",
 ]

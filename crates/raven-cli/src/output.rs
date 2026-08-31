@@ -16,6 +16,7 @@ const LOGO_GRADIENT: [(u8, u8, u8); 6] =
 
 const ERC20_TRANSFER_DISABLED_HINT: &str =
 	"disabled; enable with `raven run --erc20-transfer-min-amount <RAW_UNITS>`";
+const REORG_MONITOR_DISABLED_HINT: &str = "disabled; enable with `raven run --reorg-monitor`";
 
 const BUILT_IN_PLUGIN_ROWS: &[BuiltInPluginRow] = &[
 	BuiltInPluginRow {
@@ -28,6 +29,12 @@ const BUILT_IN_PLUGIN_ROWS: &[BuiltInPluginRow] = &[
 		marker: "○",
 		name: "erc20-transfer",
 		detail: ERC20_TRANSFER_DISABLED_HINT,
+		style: BuiltInPluginStyle::Disabled,
+	},
+	BuiltInPluginRow {
+		marker: "○",
+		name: "reorg-monitor",
+		detail: REORG_MONITOR_DISABLED_HINT,
 		style: BuiltInPluginStyle::Disabled,
 	},
 ];
@@ -155,15 +162,20 @@ mod tests {
 	use super::*;
 
 	#[test]
-	fn plugin_list_shows_erc20_transfer_as_disabled_builtin() {
-		let row = BUILT_IN_PLUGIN_ROWS
-			.iter()
-			.find(|row| row.name == "erc20-transfer")
-			.expect("erc20-transfer should be listed as a built-in plugin");
+	fn plugin_list_shows_opt_in_builtins_as_disabled() {
+		for (name, hint) in [
+			("erc20-transfer", ERC20_TRANSFER_DISABLED_HINT),
+			("reorg-monitor", REORG_MONITOR_DISABLED_HINT),
+		] {
+			let row = BUILT_IN_PLUGIN_ROWS
+				.iter()
+				.find(|row| row.name == name)
+				.unwrap_or_else(|| panic!("{name} should be listed as a built-in plugin"));
 
-		assert_eq!(row.marker, "○");
-		assert_eq!(row.style, BuiltInPluginStyle::Disabled);
-		assert_eq!(row.detail, ERC20_TRANSFER_DISABLED_HINT);
-		assert!(row.detail.contains("raven run --erc20-transfer-min-amount"));
+			assert_eq!(row.marker, "○");
+			assert_eq!(row.style, BuiltInPluginStyle::Disabled);
+			assert_eq!(row.detail, hint);
+			assert!(row.detail.contains("raven run --"));
+		}
 	}
 }

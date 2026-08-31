@@ -42,6 +42,7 @@ raven run [--rpc-url <URL>] [OPTIONS]
 | `--start <POSITION>`                | —              | `resume`     | `resume`, `latest`, or an inclusive block height              |
 | `--reorg-depth <BLOCKS>`             | —              | `64`         | Canonical ancestry retained for shallow-fork correction       |
 | `--block-fetch-mode <MODE>`          | —              | `batch`      | Block/log retrieval mode: `batch` or `sequential`              |
+| `--reorg-monitor`                    | —              | Disabled     | Report applied and reverted blocks through tracing             |
 | `--erc20-transfer-min-amount <RAW_UNITS>...` | —     | Disabled     | One shared threshold or one positional threshold per token    |
 | `--erc20-token <ADDRESS>...`        | —              | All tokens   | Token contracts in threshold-pairing order                     |
 
@@ -97,6 +98,22 @@ checkpoint. Use `--start <BLOCK>` when the new configuration must backfill
 historical transfers; use the default `resume` when only future activity is
 required.
 
+### Reorg monitor
+
+The `reorg-monitor` plugin is statically linked but disabled until
+`--reorg-monitor` is supplied:
+
+```bash
+raven run --rpc-url https://your-evm-rpc.example --reorg-monitor
+```
+
+It logs every `BlockApplied` event at `INFO` and every `BlockReverted` event at
+`WARN`, including the chain ID and exact block identity. It does not make RPC
+calls or discover forks itself; it observes the shallow-reorg order established
+by the source: old tip-to-ancestor reverts, then ascending replacement applies.
+See the [reorg monitor plugin guide](/docs/plugins/reorg-monitor) for a complete
+sequence and its operational limits.
+
 ### Why there is no `--source`
 
 `raven run` is the standalone JSON-RPC deployment. Alloy is the Rust library
@@ -150,6 +167,7 @@ Current output:
 Built-in plugins
   ● block-logger  bundled with `raven run`
   ○ erc20-transfer  disabled; enable with `raven run --erc20-transfer-min-amount <RAW_UNITS>`
+  ○ reorg-monitor  disabled; enable with `raven run --reorg-monitor`
 
 External plugins
   ○ None installed (installation is planned)
@@ -256,14 +274,35 @@ for isolated development and automated tests.
 Raven uses `tracing` and reads `RUST_LOG`:
 
 ```bash
-RUST_LOG=raven=debug,raven_source_alloy=debug \
+RUST_LOG=raven=debug,raven_plugin_=debug,raven_source_alloy=debug \
   raven run --rpc-url http://localhost:8545
 ```
 
-The default filter enables info logs for the CLI and Alloy-backed RPC adapter.
+The default filter enables info logs for the CLI, statically linked
+`raven-plugin-*` crates, and Alloy-backed RPC adapter. Set `RUST_LOG` to
+override those directives when a different level or target set is needed.
 
 In an interactive terminal, Raven also colors structured log fields by value
 type: strings and URLs are cyan, numbers are yellow, booleans are green or red,
 hashes are magenta, and errors are red. Field names remain dim so values are
 easy to scan. These colors follow the same ANSI and `NO_COLOR` behavior as the
 rest of the CLI.
+
+When the CLI registers a plugin, it also assigns that plugin a generated,
+distinct terminal hue. Every tracing event emitted inside the plugin's
+`start`, `handle_event`, or `shutdown` call is prefixed with a compact colored
+name tag. This keeps interleaved output attributable when several plugins
+observe the same block:
+
+```text
+2026-08-31T08:10:33.010953Z  INFO [ block-logger ] raven::runner: processed block block_number=119117087 ...
+2026-08-31T08:10:33.012144Z  INFO [ erc20-transfer ] raven_plugin_erc20_transfer: large ERC-20 transfer ...
+2026-08-31T08:10:33.013998Z  WARN [ reorg-monitor ] raven_plugin_reorg_monitor: block left canonical chain; shallow reorg detected ...
+```
+
+The tag is the visual boundary for consecutive lines from one plugin; Raven
+keeps individual tracing events on one terminal line. Colors are deterministic
+for the same plugin registration order and are distinct for the first 360
+registered plugins. Source, runtime, checkpoint, and CLI orchestration logs do
+not receive a plugin tag. With `NO_COLOR` or redirected output, the same
+`[ plugin-name ]` text remains without ANSI color.

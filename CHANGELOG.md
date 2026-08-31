@@ -35,6 +35,10 @@ on August 25, 2026 (UTC).
   `--erc20-token` options.
 - Updated `raven plugins list` to show disabled built-in plugins with their
   enable command, starting with `erc20-transfer`.
+- Added the opt-in `reorg-monitor` built-in plugin, which reports normalized
+  block applies and shallow-reorg reverts through tracing.
+- Tagged plugin-originated terminal logs with deterministic, distinct colors
+  assigned during CLI registration, while preserving plain tags without ANSI.
 - Established `crates/plugins/<plugin>/` as the workspace layout for static
   plugin crates and moved `raven-plugin-erc20-transfer` into it.
 

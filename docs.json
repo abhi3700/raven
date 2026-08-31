@@ -50,7 +50,8 @@
       {
         "group": "Plugins",
         "pages": [
-          "docs/plugins/erc20-transfer"
+          "docs/plugins/erc20-transfer",
+          "docs/plugins/reorg-monitor"
         ]
       },
       {
