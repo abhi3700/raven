@@ -29,6 +29,9 @@ on August 25, 2026 (UTC).
 
 ### Changed
 
+- Shortened the primary workspace crate directories to `crates/cli`,
+  `crates/core`, `crates/plugin-sdk`, `crates/runtime`, and
+  `crates/source-alloy` while preserving their existing Cargo package names.
 - Replaced string block and parent hashes with `alloy_primitives::B256` while
   preserving their `0x`-prefixed JSON representation.
 - Implemented persistent `raven plugins install` and `remove` for bundled

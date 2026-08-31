@@ -3,7 +3,9 @@ title: "Workspace crates"
 description: "Responsibilities and public interfaces for every crate in the Raven workspace."
 ---
 
-Raven is organized as a Cargo workspace with six crates.
+Raven is organized as a Cargo workspace with seven crates. Directory names are
+short filesystem labels; Cargo package names retain the `raven-*` prefix used by
+`cargo -p`, dependency declarations, and Rust imports.
 
 Reusable statically linked plugin crates live under `crates/plugins/<plugin>/`.
 Each plugin keeps its own package manifest, source tree, tests, and dependencies;
@@ -13,15 +15,15 @@ naming convention.
 See [Contribute to Raven](/docs/development/contributing) for the plugin
 contribution, validation, and pull request workflow.
 
-| Crate | Kind | Responsibility |
-| --- | --- | --- |
-| `raven-core` | Library | Validated, source-independent chain types |
-| `raven-plugin-erc20-transfer` | Library | Static large ERC-20 transfer detection plugin in `crates/plugins/erc20-transfer` |
-| `raven-plugin-reorg-monitor` | Library | Static canonical-chain transition monitor in `crates/plugins/reorg-monitor` |
-| `raven-plugin-sdk` | Library | Plugin trait, context, metadata, and errors |
-| `raven-runtime` | Library | Plugin registration, lifecycle, validation, and dispatch |
-| `raven-source-alloy` | Library | Alloy-backed JSON-RPC polling, WS subscriptions, reconciliation, and normalization |
-| `raven` | Binary | CLI parsing and source/runtime orchestration |
+| Cargo package | Directory | Kind | Responsibility |
+| --- | --- | --- | --- |
+| `raven-core` | `crates/core` | Library | Validated, source-independent chain types |
+| `raven-plugin-erc20-transfer` | `crates/plugins/erc20-transfer` | Library | Static large ERC-20 transfer detection plugin |
+| `raven-plugin-reorg-monitor` | `crates/plugins/reorg-monitor` | Library | Static canonical-chain transition monitor |
+| `raven-plugin-sdk` | `crates/plugin-sdk` | Library | Plugin trait, context, metadata, and errors |
+| `raven-runtime` | `crates/runtime` | Library | Plugin registration, lifecycle, validation, and dispatch |
+| `raven-source-alloy` | `crates/source-alloy` | Library | Alloy-backed JSON-RPC polling, WS subscriptions, reconciliation, and normalization |
+| `raven` | `crates/cli` | Binary | CLI parsing and source/runtime orchestration |
 
 ## `raven-core`
 

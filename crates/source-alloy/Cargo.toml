@@ -10,7 +10,7 @@ rust-version.workspace = true
 alloy.workspace = true
 dotenvy = "0.15.7"
 futures-util.workspace = true
-raven-core = { path = "../raven-core" }
+raven-core = { path = "../core" }
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
@@ -20,6 +20,6 @@ alloy-primitives.workspace = true
 eyre.workspace = true
 async-trait.workspace = true
 raven-plugin-erc20-transfer = { path = "../plugins/erc20-transfer" }
-raven-plugin-sdk = { path = "../raven-plugin-sdk" }
-raven-runtime = { path = "../raven-runtime" }
+raven-plugin-sdk = { path = "../plugin-sdk" }
+raven-runtime = { path = "../runtime" }
 tracing-subscriber.workspace = true

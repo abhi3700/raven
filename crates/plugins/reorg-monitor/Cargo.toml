@@ -8,8 +8,8 @@ rust-version.workspace = true
 
 [dependencies]
 async-trait.workspace = true
-raven-core = { path = "../../raven-core" }
-raven-plugin-sdk = { path = "../../raven-plugin-sdk" }
+raven-core = { path = "../../core" }
+raven-plugin-sdk = { path = "../../plugin-sdk" }
 tracing.workspace = true
 
 [dev-dependencies]

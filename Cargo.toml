@@ -1,12 +1,12 @@
 [workspace]
 resolver = "3"
 members = [
-    "crates/raven-cli",
-    "crates/raven-core",
+    "crates/cli",
+    "crates/core",
     "crates/plugins/*",
-    "crates/raven-plugin-sdk",
-    "crates/raven-runtime",
-    "crates/raven-source-alloy",
+    "crates/plugin-sdk",
+    "crates/runtime",
+    "crates/source-alloy",
 ]
 
 [workspace.package]

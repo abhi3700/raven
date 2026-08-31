@@ -10,23 +10,23 @@ what the repository actually supports today.
 
 ## Architecture Boundaries
 
-- `crates/raven-core` owns source-independent normalized chain types, validation,
+- `crates/core` owns source-independent normalized chain types, validation,
   and core errors.
-- `crates/raven-runtime` owns plugin registration, lifecycle, dispatch,
+- `crates/runtime` owns plugin registration, lifecycle, dispatch,
   worker isolation, delivery outcomes, and runtime health.
-- `crates/raven-plugin-sdk` owns the public plugin contract, context, metadata,
+- `crates/plugin-sdk` owns the public plugin contract, context, metadata,
   and example plugin surface.
 - `crates/plugins/<plugin>` contains individually packaged, statically linked
   Raven plugins. Keep each plugin in its own crate and preserve the
   `raven-plugin-*` package naming convention.
-- `crates/raven-source-alloy` owns Alloy-backed HTTP/WebSocket JSON-RPC
+- `crates/source-alloy` owns Alloy-backed HTTP/WebSocket JSON-RPC
   ingestion, source-native conversion, retry/reconciliation, and reorg emission.
-- `crates/raven-cli` owns Clap UX, config resolution, source/runtime
+- `crates/cli` owns Clap UX, config resolution, source/runtime
   orchestration, checkpoints, terminal output, logging, and shutdown handling.
 
 Do not move behavior across these boundaries without a clear reason. In
 particular, core types should stay source-independent, while Alloy-specific RPC
-logic should stay in `raven-source-alloy`.
+logic should stay in the `raven-source-alloy` package under `crates/source-alloy`.
 
 ## Rust Conventions
 

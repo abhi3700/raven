@@ -242,12 +242,12 @@ cargo run -p raven-plugin-sdk --example block_logger
 raven/
 ├── CHANGELOG.md            # Weekly commit-derived project history
 ├── crates/
-│   ├── raven-cli/           # CLI and source/runtime orchestration
-│   ├── raven-core/          # Validated normalized chain events
+│   ├── cli/                 # CLI and source/runtime orchestration
+│   ├── core/                # Validated normalized chain events
 │   ├── plugins/             # Bundled, statically linked plugin crates
-│   ├── raven-plugin-sdk/    # Plugin contract and context
-│   ├── raven-runtime/       # Registry, lifecycle, and dispatcher
-│   └── raven-source-alloy/  # Alloy-backed HTTP/WebSocket JSON-RPC source
+│   ├── plugin-sdk/          # Plugin contract and context
+│   ├── runtime/             # Registry, lifecycle, and dispatcher
+│   └── source-alloy/        # Alloy-backed HTTP/WebSocket JSON-RPC source
 ├── docs/                    # Mintlify MDX pages
 ├── docs.json                # Mintlify site configuration
 ├── res/                     # Brand assets

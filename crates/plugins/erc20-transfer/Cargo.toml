@@ -10,8 +10,8 @@ rust-version.workspace = true
 alloy-primitives.workspace = true
 alloy-sol-types.workspace = true
 async-trait.workspace = true
-raven-core = { path = "../../raven-core" }
-raven-plugin-sdk = { path = "../../raven-plugin-sdk" }
+raven-core = { path = "../../core" }
+raven-plugin-sdk = { path = "../../plugin-sdk" }
 thiserror.workspace = true
 tracing.workspace = true
 
