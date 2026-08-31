@@ -1,10 +1,14 @@
 use crate::{BlockEvent, ChainId};
 use serde::{Deserialize, Serialize};
 
-/// A normalized chain event produced by a Raven event source.
+/// A normalized chain event produced by a Raven event source (local or ext. RPC).
 ///
 /// Alloy and Reth sources convert their native event types into this
 /// representation before forwarding events to the Raven runtime.
+///
+/// Alloy events ──┐
+///                ├──► ChainEvent ──► Raven Runtime ──► Plugins
+/// Reth events  ──┘
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum ChainEvent {

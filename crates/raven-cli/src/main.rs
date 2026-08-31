@@ -8,7 +8,7 @@ mod runner;
 use std::process::ExitCode;
 
 use clap::{CommandFactory, Parser};
-use cli::{Cli, Command, ConfigCommand, DoctorArgs, PluginCommand};
+use cli::{Cli, Command, ConfigCommand, DoctorArgs, PluginCommand, PluginInstallArgs};
 use eyre::{Result, bail};
 
 #[tokio::main]
@@ -30,31 +30,23 @@ async fn run_cli() -> Result<()> {
 	match cli.command {
 		Some(Command::Run(args)) => {
 			let rpc_url = config::resolve_rpc_url(args.rpc_url.as_deref())?;
+			let installed_plugins = config::get_installed_plugins()?;
 			output::print_banner();
-			runner::run(args, rpc_url).await?;
+			runner::run(args, rpc_url, installed_plugins).await?;
 		},
 
 		Some(Command::Plugins { command }) => match command {
-			PluginCommand::List => {
-				output::print_plugins();
+			PluginCommand::List { details } => {
+				let installed_plugins = config::get_installed_plugins()?;
+				output::print_plugins(&installed_plugins, details);
 			},
 
-			PluginCommand::Install { name } => {
-				if let Some(built_in) = built_in_plugin(&name) {
-					bail!(
-						"external plugin installation is not available yet\n  requested: {name}\n  note: `{built_in}` is built into `raven run` and needs no installation"
-					);
-				}
-
-				bail!(
-					"external plugin installation is not available yet\n  requested: {name}\n  status: planned"
-				);
+			PluginCommand::Install(args) => {
+				handle_plugin_install(args)?;
 			},
 
 			PluginCommand::Remove { name } => {
-				bail!(
-					"external plugin removal is not available yet\n  requested: {name}\n  status: planned"
-				);
+				handle_plugin_remove(&name)?;
 			},
 		},
 
@@ -92,7 +84,7 @@ fn is_block_logger(name: &str) -> bool {
 	matches!(name, "block-logger" | "blocklogger")
 }
 
-fn built_in_plugin(name: &str) -> Option<&'static str> {
+fn known_plugin_name(name: &str) -> Option<&'static str> {
 	if is_block_logger(name) {
 		Some("block-logger")
 	} else if matches!(name, "erc20-transfer" | "erc20transfer") {
@@ -102,6 +94,58 @@ fn built_in_plugin(name: &str) -> Option<&'static str> {
 	} else {
 		None
 	}
+}
+
+fn handle_plugin_install(args: PluginInstallArgs) -> Result<()> {
+	let PluginInstallArgs { name, min_amount, token, short } = args;
+	match known_plugin_name(&name) {
+		Some("block-logger") => bail!(
+			"`block-logger` is always active with `raven run` and cannot be installed separately"
+		),
+		Some("erc20-transfer") => {
+			let minimum_amounts = min_amount.ok_or_else(|| {
+				eyre::eyre!(
+					"`erc20-transfer` requires `--min-amount <RAW_UNITS>...` during installation"
+				)
+			})?;
+			let (path, replaced) = config::install_erc20_transfer(&minimum_amounts, &token, short)?;
+			output::print_plugin_installed("erc20-transfer", &path, replaced);
+		},
+		Some("reorg-monitor") => {
+			if min_amount.is_some() || !token.is_empty() || short {
+				bail!("`reorg-monitor` does not accept `--min-amount`, `--token`, or `--short`");
+			}
+			let (path, replaced) = config::install_reorg_monitor()?;
+			output::print_plugin_installed("reorg-monitor", &path, replaced);
+		},
+		Some(_) => unreachable!("known plugin names are exhaustive"),
+		None => bail!(
+			"external plugin installation is not available yet\n  requested: {name}\n  status: loading support is planned"
+		),
+	}
+
+	Ok(())
+}
+
+fn handle_plugin_remove(name: &str) -> Result<()> {
+	match known_plugin_name(name) {
+		Some("block-logger") =>
+			bail!("`block-logger` is always active with `raven run` and cannot be removed"),
+		Some("erc20-transfer") => {
+			let (path, removed) = config::remove_erc20_transfer()?;
+			output::print_plugin_removed("erc20-transfer", &path, removed);
+		},
+		Some("reorg-monitor") => {
+			let (path, removed) = config::remove_reorg_monitor()?;
+			output::print_plugin_removed("reorg-monitor", &path, removed);
+		},
+		Some(_) => unreachable!("known plugin names are exhaustive"),
+		None => bail!(
+			"external plugin removal is not available yet\n  requested: {name}\n  status: loading support is planned"
+		),
+	}
+
+	Ok(())
 }
 
 fn handle_config_command(command: ConfigCommand) -> Result<()> {
@@ -135,10 +179,10 @@ mod tests {
 	}
 
 	#[test]
-	fn recognizes_built_in_plugins() {
-		assert_eq!(built_in_plugin("blocklogger"), Some("block-logger"));
-		assert_eq!(built_in_plugin("erc20-transfer"), Some("erc20-transfer"));
-		assert_eq!(built_in_plugin("reorgmonitor"), Some("reorg-monitor"));
-		assert_eq!(built_in_plugin("whale-detector"), None);
+	fn recognizes_known_plugin_names() {
+		assert_eq!(known_plugin_name("blocklogger"), Some("block-logger"));
+		assert_eq!(known_plugin_name("erc20-transfer"), Some("erc20-transfer"));
+		assert_eq!(known_plugin_name("reorgmonitor"), Some("reorg-monitor"));
+		assert_eq!(known_plugin_name("whale-detector"), None);
 	}
 }

@@ -68,21 +68,22 @@ The CLI's built-in `block-logger` plugin logs each processed block.
 
 ## Monitor large ERC-20 transfers
 
-Set an inclusive amount threshold in the token's raw smallest unit:
+Install the bundled plugin with an inclusive amount threshold in the token's
+raw smallest unit:
 
 ```bash
-raven run \
-  --rpc-url http://localhost:8545 \
-  --erc20-transfer-min-amount 1000000000000000000000 \
-  --erc20-token 0x1111111111111111111111111111111111111111 0x2222222222222222222222222222222222222222
+raven plugins install erc20-transfer \
+  --min-amount 1000000000000000000000 \
+  --token 0x1111111111111111111111111111111111111111 0x2222222222222222222222222222222222222222
+raven run
 ```
 
-`--erc20-transfer-min-amount` enables the statically linked monitor. List
-several contracts after one `--erc20-token` flag, or omit it to inspect valid
+List several contracts after one `--token` flag, or omit it to inspect valid
 ERC-20 `Transfer` logs from all contracts. One amount applies to every listed
 token; multiple amounts pair positionally with the same number of addresses.
-Amounts are deliberately not decimal-adjusted because token decimals belong to
-each smart contract.
+Amounts are not decimal-adjusted because decimals belong to each token
+contract. Full hashes and addresses are printed by default; add `--short` to
+the install command to save abbreviated terminal output.
 
 The plugin reads only `BlockEvent.logs()` and never polls the chain. It reports
 matching applied transfers through tracing. If a retained block is removed by a
@@ -91,13 +92,12 @@ reports those matches with `action=reverted`.
 
 ## Monitor shallow reorgs
 
-Enable the statically linked reorg monitor to make each normalized chain
-transition visible in terminal tracing:
+Install the bundled reorg monitor to make each normalized chain transition
+visible in terminal tracing:
 
 ```bash
-raven run \
-  --rpc-url http://localhost:8545 \
-  --reorg-monitor
+raven plugins install reorg-monitor
+raven run
 ```
 
 Applied blocks are reported at `INFO`. When the source removes a retained block

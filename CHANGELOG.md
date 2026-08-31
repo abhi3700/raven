@@ -31,14 +31,18 @@ on August 25, 2026 (UTC).
 
 - Replaced string block and parent hashes with `alloy_primitives::B256` while
   preserving their `0x`-prefixed JSON representation.
-- Extended `raven run` with `--erc20-transfer-min-amount` and repeatable
-  `--erc20-token` options.
-- Updated `raven plugins list` to show disabled built-in plugins with their
-  enable command, starting with `erc20-transfer`.
-- Added the opt-in `reorg-monitor` built-in plugin, which reports normalized
+- Implemented persistent `raven plugins install` and `remove` for bundled
+  plugins, keeping plugin-specific configuration out of `raven run`.
+- Extended `raven plugins list --details` with install arguments and saved
+  values for installed and uninstalled bundled plugins.
+- Added the opt-in bundled `reorg-monitor` plugin, which reports normalized
   block applies and shallow-reorg reverts through tracing.
 - Tagged plugin-originated terminal logs with deterministic, distinct colors
   assigned during CLI registration, while preserving plain tags without ANSI.
+- Grouped every matching ERC-20 transfer into one terminal report per block,
+  while retaining complete per-transfer tracing fields at `DEBUG`.
+- Made full ERC-20 identifiers the default terminal format and added a
+  persisted `--short` installation option for abbreviated output.
 - Established `crates/plugins/<plugin>/` as the workspace layout for static
   plugin crates and moved `raven-plugin-erc20-transfer` into it.
 

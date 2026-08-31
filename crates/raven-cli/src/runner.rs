@@ -3,7 +3,7 @@ use std::{collections::HashSet, sync::Arc, time::Duration};
 use async_trait::async_trait;
 use eyre::{Result, WrapErr, bail};
 use raven_core::ChainEvent;
-use raven_plugin_erc20_transfer::{Erc20TransferConfig, Erc20TransferPlugin};
+use raven_plugin_erc20_transfer::Erc20TransferPlugin;
 use raven_plugin_reorg_monitor::ReorgMonitorPlugin;
 use raven_plugin_sdk::{Plugin, PluginContext, PluginMetadata, PluginResult};
 use raven_runtime::{DispatchReceipt, PluginOutcome, PluginOutcomeStatus, Runtime};
@@ -17,6 +17,7 @@ use tracing::{Instrument, debug, error, info, warn};
 use crate::{
 	checkpoint::Checkpoint,
 	cli::{RunArgs, StartArg},
+	config::InstalledPlugins,
 	logging::{PluginColor, PluginColorAllocator, PluginLogIdentity, plugin_span},
 };
 
@@ -24,9 +25,11 @@ const EVENT_CHANNEL_CAPACITY: usize = 256;
 const RPC_INSPECTION_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Runs RPC ingestion until it stops or the user presses Ctrl+C.
-pub(crate) async fn run(args: RunArgs, rpc_url: String) -> Result<()> {
-	let erc20_transfer_config =
-		erc20_transfer_config(args.erc20_transfer_min_amount.as_deref(), &args.erc20_token)?;
+pub(crate) async fn run(
+	args: RunArgs,
+	rpc_url: String,
+	installed_plugins: InstalledPlugins,
+) -> Result<()> {
 	let endpoint = tokio::time::timeout(RPC_INSPECTION_TIMEOUT, inspect_rpc_endpoint(&rpc_url))
 		.await
 		.wrap_err("RPC connectivity check timed out")??;
@@ -35,11 +38,15 @@ pub(crate) async fn run(args: RunArgs, rpc_url: String) -> Result<()> {
 	let mut runtime = Runtime::new(endpoint.chain_id);
 	let mut plugin_colors = PluginColorAllocator::default();
 	register_cli_plugin(&mut runtime, &mut plugin_colors, BlockLoggerPlugin)?;
-	if args.reorg_monitor {
+	if installed_plugins.reorg_monitor_installed() {
 		register_cli_plugin(&mut runtime, &mut plugin_colors, ReorgMonitorPlugin::new())?;
 	}
-	if let Some(config) = erc20_transfer_config {
-		register_cli_plugin(&mut runtime, &mut plugin_colors, Erc20TransferPlugin::new(config))?;
+	if let Some(settings) = installed_plugins.erc20_transfer() {
+		let plugin = Erc20TransferPlugin::with_output_format(
+			settings.plugin_config()?,
+			settings.output_format(),
+		);
+		register_cli_plugin(&mut runtime, &mut plugin_colors, plugin)?;
 	}
 	let outcomes = runtime.subscribe_outcomes();
 	runtime.start().await?;
@@ -97,28 +104,6 @@ pub(crate) async fn run(args: RunArgs, rpc_url: String) -> Result<()> {
 	source_result?;
 	shutdown_result?;
 	Ok(())
-}
-
-fn erc20_transfer_config(
-	minimum_amounts: Option<&[alloy_primitives::U256]>,
-	token_addresses: &[alloy_primitives::Address],
-) -> Result<Option<Erc20TransferConfig>> {
-	let Some(minimum_amounts) = minimum_amounts else { return Ok(None) };
-
-	match minimum_amounts {
-		[] => bail!("at least one ERC-20 transfer minimum amount is required"),
-		[minimum_amount] =>
-			Ok(Some(Erc20TransferConfig::new(*minimum_amount, token_addresses.iter().copied())?)),
-		_ if minimum_amounts.len() == token_addresses.len() =>
-			Ok(Some(Erc20TransferConfig::new_with_token_thresholds(
-				token_addresses.iter().copied().zip(minimum_amounts.iter().copied()),
-			)?)),
-		_ => bail!(
-			"ERC-20 transfer minimum amounts must contain one shared value or one value per token; got {} amounts and {} tokens",
-			minimum_amounts.len(),
-			token_addresses.len()
-		),
-	}
 }
 
 fn resolve_start(
@@ -395,7 +380,7 @@ impl Plugin for BlockLoggerPlugin {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use alloy_primitives::{Address, B256, U256};
+	use alloy_primitives::B256;
 	use raven_core::{BlockEvent, ChainId};
 	use raven_plugin_sdk::PluginError;
 	use tokio::sync::Notify;
@@ -451,39 +436,6 @@ mod tests {
 			)
 			.unwrap(),
 		)
-	}
-
-	#[test]
-	fn builds_positionally_paired_erc20_thresholds() {
-		let token_a = Address::repeat_byte(0x11);
-		let token_b = Address::repeat_byte(0x22);
-		let amounts = [U256::from(1_000_000), U256::from(5_000_000)];
-		let config = erc20_transfer_config(Some(&amounts), &[token_a, token_b]).unwrap().unwrap();
-
-		assert_eq!(config.minimum_amount_for(token_a), Some(amounts[0]));
-		assert_eq!(config.minimum_amount_for(token_b), Some(amounts[1]));
-	}
-
-	#[test]
-	fn broadcasts_one_erc20_threshold_to_multiple_tokens() {
-		let token_a = Address::repeat_byte(0x11);
-		let token_b = Address::repeat_byte(0x22);
-		let amount = U256::from(1_000_000);
-		let config = erc20_transfer_config(Some(&[amount]), &[token_a, token_b]).unwrap().unwrap();
-
-		assert_eq!(config.minimum_amount_for(token_a), Some(amount));
-		assert_eq!(config.minimum_amount_for(token_b), Some(amount));
-	}
-
-	#[test]
-	fn rejects_mismatched_erc20_threshold_and_token_counts() {
-		let error = erc20_transfer_config(
-			Some(&[U256::from(1), U256::from(2)]),
-			&[Address::repeat_byte(0x11)],
-		)
-		.unwrap_err();
-
-		assert!(error.to_string().contains("got 2 amounts and 1 tokens"));
 	}
 
 	#[tokio::test]

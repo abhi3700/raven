@@ -49,13 +49,14 @@ plugins own application logic.
 - Bounded plugin lifecycle hooks, worker health, and aggregate cleanup errors
 - Persistent RPC URL configuration with CLI and environment overrides
 - Working CLI orchestration with graceful Ctrl+C shutdown
-- Opt-in built-in monitoring for large ERC-20 transfers, including reorg corrections
-- Opt-in built-in reorg monitoring for applied and reverted canonical blocks
+- Persisted bundled-plugin installation and configuration
+- Bundled monitoring for large ERC-20 transfers, including reorg corrections
+- Bundled reorg monitoring for applied and reverted canonical blocks
 - Color-coded plugin identity tags for readable multi-plugin terminal output
 - Normalized event boundary designed for future Reth ExEx support
 
-> **Important:** Raven is early-stage. Dynamic plugin installation and the
-> Raven-enabled Reth CLI/ExEx integration are planned but not yet implemented.
+> **Important:** Raven is early-stage. External plugin discovery/loading and
+> the Raven-enabled Reth CLI/ExEx integration are planned but not yet implemented.
 
 ## Getting started
 
@@ -107,7 +108,7 @@ raven run --rpc-url wss://your-evm-rpc.example
 ```
 
 Resolution order is `--rpc-url`, then `NODE_RPC_URL`, then persisted config.
-Run `raven config clear` to remove the persisted value.
+Run `raven config clear` to remove the persisted RPC URL and plugin installations.
 
 Raven calls `eth_chainId`, accepts any non-zero EIP-155 chain ID, selects that
 chain's durable checkpoint, and initializes the runtime. There is no
@@ -126,30 +127,30 @@ is no checkpoint. Use `--start latest` to ignore saved progress or
 canonical blocks by default and delivers shallow-fork reverts before
 replacement blocks.
 
-Enable the statically linked ERC-20 transfer monitor with an inclusive threshold
-in raw token units:
+Install the bundled ERC-20 transfer monitor with an inclusive threshold in raw
+token units, then start Raven with no plugin-specific run flags:
 
 ```bash
-raven run \
-  --rpc-url http://localhost:8545 \
-  --erc20-transfer-min-amount 1000000000000000000000 \
-  --erc20-token 0x1111111111111111111111111111111111111111 0x2222222222222222222222222222222222222222
+raven plugins install erc20-transfer \
+  --min-amount 1000000000000000000000 \
+  --token 0x1111111111111111111111111111111111111111 0x2222222222222222222222222222222222222222
+raven run
 ```
 
-List several contracts after one `--erc20-token` flag, or omit it to accept
-valid ERC-20 `Transfer` logs from every contract. One minimum amount applies to
-every listed token; provide the same number of amounts and addresses for
-positionally paired thresholds. Raven does not guess token decimals. Applied
-matches are logged as detections; a shallow reorg logs the corresponding
-transfers as reverted from the same retained block payload.
+List several contracts after one `--token` flag, or omit it to accept valid
+ERC-20 `Transfer` logs from every contract. One minimum amount applies to every
+listed token; provide the same number of amounts and addresses for positional
+thresholds. Long terminal output is the default; add `--short` during
+installation to abbreviate hashes and addresses. Reinstalling the same plugin
+updates its saved configuration.
 
-Enable the reorg monitor to report every applied/reverted transition from the
+Install the reorg monitor to report every applied/reverted transition from the
 same normalized event stream:
 
 ```bash
-raven run \
-  --rpc-url http://localhost:8545 \
-  --reorg-monitor
+raven plugins install reorg-monitor
+raven plugins list --details
+raven run
 ```
 
 Applied blocks log at `INFO`; reverted blocks log at `WARN` with their hashes,
@@ -243,7 +244,7 @@ raven/
 ├── crates/
 │   ├── raven-cli/           # CLI and source/runtime orchestration
 │   ├── raven-core/          # Validated normalized chain events
-│   ├── plugins/             # Statically linked plugin crates
+│   ├── plugins/             # Bundled, statically linked plugin crates
 │   ├── raven-plugin-sdk/    # Plugin contract and context
 │   ├── raven-runtime/       # Registry, lifecycle, and dispatcher
 │   └── raven-source-alloy/  # Alloy-backed HTTP/WebSocket JSON-RPC source

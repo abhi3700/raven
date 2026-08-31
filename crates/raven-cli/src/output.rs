@@ -2,6 +2,8 @@ use std::path::Path;
 
 use colored::Colorize;
 
+use crate::config::{Erc20TransferSettings, InstalledPlugins};
+
 const LOGO_LINES: [&str; 6] = [
 	"██████╗  █████╗ ██╗   ██╗███████╗███╗   ██╗",
 	"██╔══██╗██╔══██╗██║   ██║██╔════╝████╗  ██║",
@@ -13,45 +15,6 @@ const LOGO_LINES: [&str; 6] = [
 
 const LOGO_GRADIENT: [(u8, u8, u8); 6] =
 	[(8, 116, 209), (12, 126, 224), (22, 139, 255), (35, 148, 255), (66, 165, 255), (96, 178, 255)];
-
-const ERC20_TRANSFER_DISABLED_HINT: &str =
-	"disabled; enable with `raven run --erc20-transfer-min-amount <RAW_UNITS>`";
-const REORG_MONITOR_DISABLED_HINT: &str = "disabled; enable with `raven run --reorg-monitor`";
-
-const BUILT_IN_PLUGIN_ROWS: &[BuiltInPluginRow] = &[
-	BuiltInPluginRow {
-		marker: "●",
-		name: "block-logger",
-		detail: "bundled with `raven run`",
-		style: BuiltInPluginStyle::Active,
-	},
-	BuiltInPluginRow {
-		marker: "○",
-		name: "erc20-transfer",
-		detail: ERC20_TRANSFER_DISABLED_HINT,
-		style: BuiltInPluginStyle::Disabled,
-	},
-	BuiltInPluginRow {
-		marker: "○",
-		name: "reorg-monitor",
-		detail: REORG_MONITOR_DISABLED_HINT,
-		style: BuiltInPluginStyle::Disabled,
-	},
-];
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct BuiltInPluginRow {
-	marker: &'static str,
-	name: &'static str,
-	detail: &'static str,
-	style: BuiltInPluginStyle,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum BuiltInPluginStyle {
-	Active,
-	Disabled,
-}
 
 pub(crate) fn print_error(error: &eyre::Report) {
 	let rendered = format!("{error:#}");
@@ -94,27 +57,111 @@ pub(crate) fn print_doctor(
 	print_field("latency_ms", &elapsed.as_millis().to_string().bright_yellow());
 }
 
-pub(crate) fn print_plugins() {
+pub(crate) fn print_plugins(plugins: &InstalledPlugins, details: bool) {
 	println!("{}", "Built-in plugins".bright_blue().bold());
-	for row in BUILT_IN_PLUGIN_ROWS {
-		match row.style {
-			BuiltInPluginStyle::Active => println!(
-				"  {} {}  {}",
-				row.marker.bright_green(),
-				row.name.bright_cyan().bold(),
-				row.detail.dimmed()
-			),
-			BuiltInPluginStyle::Disabled => println!(
-				"  {} {}  {}",
-				row.marker.bright_black(),
-				row.name.bright_black(),
-				row.detail.bright_black()
-			),
-		}
+	println!(
+		"  {} {}  {}",
+		"●".bright_green(),
+		"block-logger".bright_cyan().bold(),
+		"always active with `raven run`".dimmed()
+	);
+	if details {
+		print_detail("origin", "built-in");
+		print_detail("arguments", "none");
 	}
+
+	println!();
+	println!("{}", "Bundled plugins".bright_blue().bold());
+	print_bundled_plugin("erc20-transfer", plugins.erc20_transfer().is_some());
+	if details {
+		print_erc20_details(plugins.erc20_transfer());
+	}
+	print_bundled_plugin("reorg-monitor", plugins.reorg_monitor_installed());
+	if details {
+		print_detail("origin", "bundled");
+		print_detail("arguments", "none");
+	}
+
 	println!();
 	println!("{}", "External plugins".bright_blue().bold());
-	println!("  {} {}", "○".bright_yellow(), "None installed (installation is planned)".yellow());
+	println!("  {} {}", "○".bright_yellow(), "Loading support is planned".yellow());
+}
+
+fn print_bundled_plugin(name: &str, installed: bool) {
+	if installed {
+		println!("  {} {}  {}", "●".bright_green(), name.bright_cyan().bold(), "installed".green());
+	} else {
+		println!(
+			"  {} {}  {}",
+			"○".bright_black(),
+			name.bright_black(),
+			format!("not installed; use `raven plugins install {name}`").bright_black()
+		);
+	}
+}
+
+fn print_erc20_details(settings: Option<&Erc20TransferSettings>) {
+	print_detail("origin", "bundled");
+	println!("      {}", "arguments:".blue().bold());
+	print_argument(
+		"--min-amount <RAW_UNITS>...",
+		"required; one shared value or one per token",
+		settings.map(|settings| settings.minimum_amounts().join(" ")),
+	);
+	let saved_tokens = settings.map(|settings| {
+		if settings.token_addresses().is_empty() {
+			"all token contracts".to_owned()
+		} else {
+			settings.token_addresses().join(" ")
+		}
+	});
+	print_argument("--token <ADDRESS>...", "optional token filter", saved_tokens);
+	let saved_format = settings.map(|settings| {
+		if settings.short() {
+			"true (short output)".to_owned()
+		} else {
+			"false (long output)".to_owned()
+		}
+	});
+	print_argument("--short", "optional; long output by default", saved_format);
+}
+
+fn print_detail(label: &str, value: &str) {
+	println!("      {} {}", format!("{label}:").blue().bold(), value.dimmed());
+}
+
+fn print_argument(name: &str, description: &str, saved: Option<String>) {
+	println!("        {}  {}", name.bright_cyan(), description.dimmed());
+	println!(
+		"          {} {}",
+		"saved:".blue(),
+		saved.unwrap_or_else(|| "not configured".to_owned()).bright_yellow()
+	);
+}
+
+pub(crate) fn print_plugin_installed(name: &str, path: &Path, replaced: bool) {
+	let action = if replaced { "configuration updated" } else { "installed" };
+	println!(
+		"{} {} {}",
+		"✔".bright_green().bold(),
+		name.bright_cyan().bold(),
+		action.green().bold()
+	);
+	print_path(path);
+}
+
+pub(crate) fn print_plugin_removed(name: &str, path: &Path, removed: bool) {
+	if removed {
+		println!(
+			"{} {} {}",
+			"✔".bright_green().bold(),
+			name.bright_cyan().bold(),
+			"removed".green().bold()
+		);
+	} else {
+		println!("{} {} was not installed", "●".bright_yellow(), name.bright_yellow());
+	}
+	print_path(path);
 }
 
 pub(crate) fn print_config_saved(path: &Path) {
@@ -162,20 +209,10 @@ mod tests {
 	use super::*;
 
 	#[test]
-	fn plugin_list_shows_opt_in_builtins_as_disabled() {
-		for (name, hint) in [
-			("erc20-transfer", ERC20_TRANSFER_DISABLED_HINT),
-			("reorg-monitor", REORG_MONITOR_DISABLED_HINT),
-		] {
-			let row = BUILT_IN_PLUGIN_ROWS
-				.iter()
-				.find(|row| row.name == name)
-				.unwrap_or_else(|| panic!("{name} should be listed as a built-in plugin"));
+	fn empty_plugin_state_marks_every_bundled_plugin_uninstalled() {
+		let plugins = InstalledPlugins::default();
 
-			assert_eq!(row.marker, "○");
-			assert_eq!(row.style, BuiltInPluginStyle::Disabled);
-			assert_eq!(row.detail, hint);
-			assert!(row.detail.contains("raven run --"));
-		}
+		assert!(plugins.erc20_transfer().is_none());
+		assert!(!plugins.reorg_monitor_installed());
 	}
 }

@@ -38,6 +38,7 @@ pub(crate) enum Command {
 	Run(RunArgs),
 
 	/// Manage Raven plugins.
+	#[command(alias = "plugin")]
 	Plugins {
 		#[command(subcommand)]
 		command: PluginCommand,
@@ -79,18 +80,6 @@ pub(crate) struct RunArgs {
 	/// Retrieve each block and its logs using `batch` or `sequential` RPC requests.
 	#[arg(long, value_enum, default_value = "batch")]
 	pub(crate) block_fetch_mode: BlockFetchModeArg,
-
-	/// Report applied and reverted blocks to make shallow reorgs visible.
-	#[arg(long)]
-	pub(crate) reorg_monitor: bool,
-
-	/// Enable ERC-20 monitoring with one shared threshold or one threshold per token.
-	#[arg(long, num_args = 1.., value_name = "RAW_UNITS", value_parser = parse_positive_u256)]
-	pub(crate) erc20_transfer_min_amount: Option<Vec<U256>>,
-
-	/// Restrict ERC-20 monitoring to these token contracts.
-	#[arg(long, num_args = 1.., value_name = "ADDRESS", requires = "erc20_transfer_min_amount")]
-	pub(crate) erc20_token: Vec<Address>,
 }
 
 /// RPC checks performed by `raven doctor`.
@@ -182,22 +171,42 @@ pub(crate) enum ConfigCommand {
 /// Plugin-management commands.
 #[derive(Debug, Subcommand)]
 pub(crate) enum PluginCommand {
-	/// List installed plugins.
-	List,
-
-	/// Install a plugin (planned).
-	Install {
-		/// Plugin name, for example `erc20-transfer`.
-		#[arg(value_name = "PLUGIN")]
-		name: String,
+	/// List bundled and external plugin status.
+	List {
+		/// Show each plugin's accepted arguments and saved values.
+		#[arg(long)]
+		details: bool,
 	},
 
-	/// Remove an installed plugin (planned).
+	/// Install and persist a bundled plugin configuration.
+	Install(PluginInstallArgs),
+
+	/// Remove a bundled plugin configuration.
 	Remove {
 		/// Plugin name.
 		#[arg(value_name = "PLUGIN")]
 		name: String,
 	},
+}
+
+/// Arguments accepted while installing a bundled plugin.
+#[derive(Debug, Args)]
+pub(crate) struct PluginInstallArgs {
+	/// Plugin name, for example `erc20-transfer`.
+	#[arg(value_name = "PLUGIN")]
+	pub(crate) name: String,
+
+	/// ERC-20 shared threshold or one positional threshold per token.
+	#[arg(long, num_args = 1.., value_name = "RAW_UNITS", value_parser = parse_positive_u256)]
+	pub(crate) min_amount: Option<Vec<U256>>,
+
+	/// ERC-20 token contracts in threshold-pairing order.
+	#[arg(long, num_args = 1.., value_name = "ADDRESS", requires = "min_amount")]
+	pub(crate) token: Vec<Address>,
+
+	/// Abbreviate hashes and addresses in ERC-20 terminal reports.
+	#[arg(long)]
+	pub(crate) short: bool,
 }
 
 #[cfg(test)]
@@ -235,9 +244,6 @@ mod tests {
 		assert_eq!(args.start, StartArg::Resume);
 		assert_eq!(args.reorg_depth, 64);
 		assert_eq!(args.block_fetch_mode, BlockFetchModeArg::Batch);
-		assert!(!args.reorg_monitor);
-		assert!(args.erc20_transfer_min_amount.is_none());
-		assert!(args.erc20_token.is_empty());
 	}
 
 	#[test]
@@ -251,11 +257,11 @@ mod tests {
 	}
 
 	#[test]
-	fn enables_reorg_monitor() {
-		let cli = Cli::try_parse_from(["raven", "run", "--reorg-monitor"]).unwrap();
-		let Some(Command::Run(args)) = cli.command else { panic!("run expected") };
-
-		assert!(args.reorg_monitor);
+	fn rejects_plugin_configuration_on_run() {
+		assert!(Cli::try_parse_from(["raven", "run", "--reorg-monitor"]).is_err());
+		assert!(
+			Cli::try_parse_from(["raven", "run", "--erc20-transfer-min-amount", "100"]).is_err()
+		);
 	}
 
 	#[test]
@@ -338,58 +344,77 @@ mod tests {
 	}
 
 	#[test]
-	fn parses_erc20_transfer_monitor_configuration() {
+	fn parses_erc20_transfer_install_configuration() {
 		let cli = Cli::try_parse_from([
 			"raven",
-			"run",
-			"--erc20-transfer-min-amount",
+			"plugins",
+			"install",
+			"erc20-transfer",
+			"--min-amount",
 			"1000000",
 			"5000000",
-			"--erc20-token",
+			"--token",
 			"0x1111111111111111111111111111111111111111",
 			"0x2222222222222222222222222222222222222222",
+			"--short",
 		])
 		.unwrap();
-		let Some(Command::Run(args)) = cli.command else { panic!("run expected") };
+		let Some(Command::Plugins { command: PluginCommand::Install(args) }) = cli.command else {
+			panic!("plugin install expected")
+		};
 
-		assert_eq!(
-			args.erc20_transfer_min_amount,
-			Some(vec![U256::from(1_000_000), U256::from(5_000_000)])
-		);
-		assert_eq!(args.erc20_token.len(), 2);
+		assert_eq!(args.name, "erc20-transfer");
+		assert_eq!(args.min_amount, Some(vec![U256::from(1_000_000), U256::from(5_000_000)]));
+		assert_eq!(args.token.len(), 2);
+		assert!(args.short);
 	}
 
 	#[test]
-	fn parses_one_erc20_threshold_for_multiple_tokens() {
+	fn parses_one_erc20_install_threshold_for_multiple_tokens() {
 		let cli = Cli::try_parse_from([
 			"raven",
-			"run",
-			"--erc20-transfer-min-amount",
+			"plugins",
+			"install",
+			"erc20-transfer",
+			"--min-amount",
 			"1000000",
-			"--erc20-token",
+			"--token",
 			"0x1111111111111111111111111111111111111111",
 			"0x2222222222222222222222222222222222222222",
 		])
 		.unwrap();
-		let Some(Command::Run(args)) = cli.command else { panic!("run expected") };
+		let Some(Command::Plugins { command: PluginCommand::Install(args) }) = cli.command else {
+			panic!("plugin install expected")
+		};
 
-		assert_eq!(args.erc20_transfer_min_amount, Some(vec![U256::from(1_000_000)]));
-		assert_eq!(args.erc20_token.len(), 2);
+		assert_eq!(args.min_amount, Some(vec![U256::from(1_000_000)]));
+		assert_eq!(args.token.len(), 2);
+		assert!(!args.short);
 	}
 
 	#[test]
-	fn rejects_erc20_token_without_threshold_and_zero_threshold() {
+	fn rejects_erc20_install_token_without_threshold_and_zero_threshold() {
 		assert!(
 			Cli::try_parse_from([
 				"raven",
-				"run",
-				"--erc20-token",
+				"plugins",
+				"install",
+				"erc20-transfer",
+				"--token",
 				"0x1111111111111111111111111111111111111111",
 			])
 			.is_err()
 		);
 		assert!(
-			Cli::try_parse_from(["raven", "run", "--erc20-transfer-min-amount", "0",]).is_err()
+			Cli::try_parse_from([
+				"raven",
+				"plugins",
+				"install",
+				"erc20-transfer",
+				"--min-amount",
+				"0",
+			])
+			.is_err()
 		);
 	}
 
@@ -398,12 +423,21 @@ mod tests {
 		let cli = Cli::try_parse_from(["raven", "plugins", "install", "whale-detector"])
 			.expect("plugin install command should parse");
 
-		let Some(Command::Plugins { command: PluginCommand::Install { name } }) = cli.command
-		else {
+		let Some(Command::Plugins { command: PluginCommand::Install(args) }) = cli.command else {
 			panic!("plugin install command should be selected");
 		};
 
-		assert_eq!(name, "whale-detector");
+		assert_eq!(args.name, "whale-detector");
+	}
+
+	#[test]
+	fn parses_plugin_list_details() {
+		let cli = Cli::try_parse_from(["raven", "plugins", "list", "--details"]).unwrap();
+
+		assert!(matches!(
+			cli.command,
+			Some(Command::Plugins { command: PluginCommand::List { details: true } })
+		));
 	}
 
 	#[test]

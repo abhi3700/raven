@@ -123,13 +123,13 @@ source-native types do not leak into the rest of the workspace.
 The binary crate owns:
 
 - Command-line parsing.
-- Persistent RPC URL configuration and override resolution.
+- Persistent RPC URL and bundled-plugin configuration.
 - Chain-specific atomic checkpoint persistence and at-least-once success gate.
 - Tracing initialization.
 - Alloy-backed RPC task creation.
 - Endpoint inspection and runtime initialization from the discovered chain ID.
 - Ctrl+C handling and graceful shutdown.
-- The built-in block logger and opt-in ERC-20 transfer monitor used by `raven run`.
+- The always-active block logger and configured bundled monitors used by `raven run`.
 
 The CLI is an integration layer. Domain types belong in `raven-core` and runtime
 policy belongs in `raven-runtime`.

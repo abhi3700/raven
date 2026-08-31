@@ -130,7 +130,7 @@ message queues, and Telegram notifications can reuse the same contracts.
 
 Prefer statically linked, configured plugins before dynamic loading:
 
-- [ ] Add typed configuration and plugin enable/disable controls.
+- [x] Add typed persisted configuration and install/remove controls for bundled plugins.
 - [ ] Add scoped storage, metrics, and cancellation capabilities to
   `PluginContext` as concrete use cases require them.
 - [ ] Define priorities and dependencies only if real plugins need ordering.
@@ -138,8 +138,9 @@ Prefer statically linked, configured plugins before dynamic loading:
 - [ ] Implement discovery, installation, removal, and dynamic loading after the
   security and ABI boundaries are explicit.
 
-The existing `raven plugins install` and `remove` commands remain intentional
-not-implemented errors until this phase.
+`raven plugins install` and `remove` now manage configuration for plugins
+already bundled with the CLI. Discovery, download, compatibility checks, and
+dynamic loading for separately distributed external plugins remain planned.
 
 ## Additional sources and scale
 

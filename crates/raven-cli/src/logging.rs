@@ -271,15 +271,39 @@ fn write_plugin_tag(writer: &mut Writer<'_>, identity: &PluginLogIdentity) -> fm
 
 impl<'writer> FormatFields<'writer> for RavenFields {
 	fn format_fields<R: RecordFields>(&self, writer: Writer<'writer>, fields: R) -> fmt::Result {
-		let mut visitor = RavenFieldVisitor { writer, is_empty: true, result: Ok(()) };
+		let mut marker = TerminalReportMarker::default();
+		fields.record(&mut marker);
+
+		let mut visitor = RavenFieldVisitor {
+			writer,
+			is_empty: true,
+			allows_multiline_message: marker.enabled,
+			result: Ok(()),
+		};
 		fields.record(&mut visitor);
 		visitor.result
 	}
 }
 
+#[derive(Default)]
+struct TerminalReportMarker {
+	enabled: bool,
+}
+
+impl Visit for TerminalReportMarker {
+	fn record_bool(&mut self, field: &Field, value: bool) {
+		if field.name() == "raven_terminal_report" {
+			self.enabled = value;
+		}
+	}
+
+	fn record_debug(&mut self, _field: &Field, _value: &dyn fmt::Debug) {}
+}
+
 struct RavenFieldVisitor<'writer> {
 	writer: Writer<'writer>,
 	is_empty: bool,
+	allows_multiline_message: bool,
 	result: fmt::Result,
 }
 
@@ -289,7 +313,11 @@ impl RavenFieldVisitor<'_> {
 			return;
 		}
 
-		let value = sanitize(value);
+		let value = if self.allows_multiline_message {
+			sanitize_terminal_report(value)
+		} else {
+			sanitize(value)
+		};
 		self.result = write!(self.writer, "{value}");
 	}
 
@@ -366,6 +394,11 @@ impl Visit for RavenFieldVisitor<'_> {
 	}
 
 	fn record_bool(&mut self, field: &Field, value: bool) {
+		if field.name() == "raven_terminal_report" {
+			self.allows_multiline_message = value;
+			return;
+		}
+
 		let color = if value { TRUE_VALUE } else { FALSE_VALUE };
 		self.write_field(field, &value.to_string(), color);
 	}
@@ -409,6 +442,26 @@ fn sanitize(value: &str) -> Cow<'_, str> {
 			'\x1b' => sanitized.push_str("\\x1b"),
 			'\u{009b}' => sanitized.push_str("\\u009b"),
 			'\n' => sanitized.push_str("\\n"),
+			'\r' => sanitized.push_str("\\r"),
+			_ => sanitized.push(character),
+		}
+	}
+
+	Cow::Owned(sanitized)
+}
+
+/// Preserves deliberate line breaks in terminal reports while still preventing
+/// escape sequences or carriage returns from controlling the terminal.
+fn sanitize_terminal_report(value: &str) -> Cow<'_, str> {
+	if !value.chars().any(|character| matches!(character, '\x1b' | '\u{009b}' | '\r')) {
+		return Cow::Borrowed(value);
+	}
+
+	let mut sanitized = String::with_capacity(value.len());
+	for character in value.chars() {
+		match character {
+			'\x1b' => sanitized.push_str("\\x1b"),
+			'\u{009b}' => sanitized.push_str("\\u009b"),
 			'\r' => sanitized.push_str("\\r"),
 			_ => sanitized.push(character),
 		}
@@ -464,6 +517,25 @@ mod tests {
 		});
 
 		assert!(output.contains("\\x1b[31mevil"));
+	}
+
+	#[test]
+	fn preserves_marked_terminal_report_line_breaks() {
+		let output = capture_log(false, || {
+			tracing::info!(raven_terminal_report = true, "+-- report\n| transfer\n+--");
+		});
+
+		assert!(output.contains("+-- report\n| transfer\n+--"));
+		assert!(!output.contains("raven_terminal_report"));
+	}
+
+	#[test]
+	fn terminal_reports_still_neutralize_ansi_sequences() {
+		let output = capture_log(false, || {
+			tracing::info!(raven_terminal_report = true, "+-- \x1b[31mreport\n+--");
+		});
+
+		assert!(output.contains("+-- \\x1b[31mreport\n+--"));
 	}
 
 	#[test]

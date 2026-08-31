@@ -70,9 +70,9 @@ runtime owns lifecycle and dispatch. Plugins own application behavior.
 - Normalize blocks and their EVM logs into source-independent `ChainEvent` values.
 - Use typed Alloy primitives for block hashes, addresses, log topics, transaction
   hashes, byte payloads, and ERC-20 amounts.
-- Enable the built-in large ERC-20 transfer monitor with raw-unit and token-contract
-  filters; reverted blocks emit matching correction telemetry.
-- Enable the built-in reorg monitor to observe every applied and reverted block
+- Install the bundled large ERC-20 transfer monitor with persisted raw-unit,
+  token-contract, and output-format settings; reverted blocks emit corrections.
+- Install the bundled reorg monitor to observe every applied and reverted block
   transition through terminal tracing.
 - Persist an RPC URL and override it through the environment or run command.
 - Register plugins by unique name and run their lifecycle.
@@ -85,8 +85,8 @@ runtime owns lifecycle and dispatch. Plugins own application behavior.
 - Bound plugin lifecycle hooks, expose worker health, and shut down cleanly.
 
 <Note>
-Raven is early-stage software. The Raven-enabled Reth CLI/ExEx path and dynamic
-plugin installation are planned, not yet implemented.
+Raven is early-stage software. The Raven-enabled Reth CLI/ExEx path and loading
+separately distributed external plugins are planned, not yet implemented.
 </Note>
 
 ## Design principle

@@ -16,8 +16,9 @@ use alloy_sol_types::{SolEvent, sol};
 use async_trait::async_trait;
 use raven_core::{BlockEvent, ChainEvent, EvmLog};
 use raven_plugin_sdk::{Plugin, PluginContext, PluginMetadata, PluginResult};
+use std::fmt::Write as _;
 use thiserror::Error;
-use tracing::info;
+use tracing::{debug, info};
 
 sol! {
 	/// ERC-20 transfer event from EIP-20.
@@ -151,15 +152,24 @@ pub struct LargeTransfer {
 	pub log_index: u64,
 }
 
-/// Statically linked plugin that reports configured large ERC-20 transfers.
+/// Bundled, statically linked plugin that reports configured large ERC-20 transfers.
 pub struct Erc20TransferPlugin {
 	config: Erc20TransferConfig,
+	output_format: Erc20TransferOutputFormat,
 }
 
 impl Erc20TransferPlugin {
-	/// Creates a transfer monitor from validated configuration.
+	/// Creates a transfer monitor with the default long terminal output.
 	pub const fn new(config: Erc20TransferConfig) -> Self {
-		Self { config }
+		Self { config, output_format: Erc20TransferOutputFormat::Long }
+	}
+
+	/// Creates a transfer monitor with an explicit terminal output format.
+	pub const fn with_output_format(
+		config: Erc20TransferConfig,
+		output_format: Erc20TransferOutputFormat,
+	) -> Self {
+		Self { config, output_format }
 	}
 
 	/// Returns matching transfers in deterministic block/log order.
@@ -173,6 +183,32 @@ impl Erc20TransferPlugin {
 				(transfer.amount >= minimum_amount).then_some(transfer)
 			})
 			.collect()
+	}
+}
+
+/// Terminal presentation used for block-scoped transfer reports.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum Erc20TransferOutputFormat {
+	/// Preserve complete block hashes, addresses, and transaction hashes.
+	#[default]
+	Long,
+
+	/// Abbreviate fixed-width hashes and addresses for quicker terminal scanning.
+	Short,
+}
+
+impl Erc20TransferOutputFormat {
+	fn is_short(&self) -> bool {
+		self.eq(&Self::Short)
+	}
+}
+
+impl Erc20TransferOutputFormat {
+	const fn as_str(self) -> &'static str {
+		match self {
+			Self::Long => "long",
+			Self::Short => "short",
+		}
 	}
 }
 
@@ -192,6 +228,89 @@ fn decode_transfer(log: &EvmLog) -> Option<LargeTransfer> {
 	})
 }
 
+/// Formats one block-scoped terminal report from deterministic transfer matches.
+///
+/// Keeping the report as one tracing event prevents concurrent plugins from
+/// inserting output between its header and rows.
+fn format_transfer_report(
+	block: &BlockEvent,
+	action: &str,
+	transfers: &[LargeTransfer],
+	output_format: Erc20TransferOutputFormat,
+) -> String {
+	let mut report = String::new();
+	if output_format.is_short() {
+		let _ = writeln!(
+			report,
+			"+-- ERC-20 transfer matches ----------------------------------------------"
+		);
+	} else {
+		let _ = writeln!(
+			report,
+			"+-- ERC-20 transfer matches --------------------------------------------------------------"
+		);
+	}
+	let _ = writeln!(
+		report,
+		"| block={} hash={} action={} matches={}",
+		block.block_number(),
+		format_identifier(block.block_hash(), output_format),
+		action,
+		transfers.len(),
+	);
+	let _ = writeln!(report, "|");
+
+	for (index, transfer) in transfers.iter().enumerate() {
+		let _ = writeln!(
+			report,
+			"| {:>2}. token={} amount={} log_index={}",
+			index + 1,
+			format_identifier(transfer.token, output_format),
+			transfer.amount,
+			transfer.log_index,
+		);
+		let _ = writeln!(
+			report,
+			"|     from={} -> to={} tx={}",
+			format_identifier(transfer.from, output_format),
+			format_identifier(transfer.to, output_format),
+			format_identifier(transfer.transaction_hash, output_format),
+		);
+	}
+
+	if output_format.is_short() {
+		let _ = write!(
+			report,
+			"+------------------------------------------------------------------------"
+		);
+	} else {
+		let _ = write!(
+			report,
+			"+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------"
+		);
+	}
+	report
+}
+
+/// Formats fixed-width hexadecimal identifiers for the selected terminal mode.
+fn format_identifier(
+	value: impl std::fmt::Display,
+	output_format: Erc20TransferOutputFormat,
+) -> String {
+	if output_format.is_short() {
+		let value = value.to_string();
+		const PREFIX_LENGTH: usize = 8;
+		const SUFFIX_LENGTH: usize = 6;
+
+		if value.len() <= PREFIX_LENGTH + SUFFIX_LENGTH + 3 {
+			return value;
+		}
+
+		return format!("{}...{}", &value[..PREFIX_LENGTH], &value[value.len() - SUFFIX_LENGTH..])
+	}
+	value.to_string()
+}
+
 #[async_trait]
 impl Plugin for Erc20TransferPlugin {
 	fn metadata(&self) -> PluginMetadata {
@@ -208,6 +327,7 @@ impl Plugin for Erc20TransferPlugin {
 			minimum_amount_floor = %self.config.minimum_amount(),
 			threshold_count = self.config.minimum_amounts.len(),
 			token_filter_count = self.config.token_addresses.len(),
+			output_format = self.output_format.as_str(),
 			"ERC-20 transfer monitor started"
 		);
 		Ok(())
@@ -215,8 +335,13 @@ impl Plugin for Erc20TransferPlugin {
 
 	async fn handle_event(&mut self, event: &ChainEvent, _context: &PluginContext) -> PluginResult {
 		let action = if event.is_applied() { "detected" } else { "reverted" };
-		for transfer in self.matching_transfers(event.block()) {
-			info!(
+		let matches = self.matching_transfers(event.block());
+		if matches.is_empty() {
+			return Ok(());
+		}
+
+		for transfer in &matches {
+			debug!(
 				action,
 				block_number = event.block_number(),
 				block_hash = %event.block().block_hash(),
@@ -229,6 +354,9 @@ impl Plugin for Erc20TransferPlugin {
 				"large ERC-20 transfer"
 			);
 		}
+
+		let report = format_transfer_report(event.block(), action, &matches, self.output_format);
+		info!(raven_terminal_report = true, "{report}");
 		Ok(())
 	}
 
@@ -326,6 +454,70 @@ mod tests {
 		assert_eq!(matches.len(), 2);
 		assert_eq!((matches[0].token, matches[0].amount), (TOKEN, U256::from(100)));
 		assert_eq!((matches[1].token, matches[1].amount), (OTHER_TOKEN, U256::from(500)));
+	}
+
+	#[test]
+	fn formats_one_readable_report_for_a_matching_block() {
+		let block = block(vec![transfer_log(TOKEN, 100, 1), transfer_log(TOKEN, 101, 2)]);
+		let transfers =
+			Erc20TransferPlugin::new(Erc20TransferConfig::new(U256::from(100), [TOKEN]).unwrap())
+				.matching_transfers(&block);
+
+		let report = format_transfer_report(
+			&block,
+			"detected",
+			&transfers,
+			Erc20TransferOutputFormat::Short,
+		);
+
+		assert!(report.starts_with("+-- ERC-20 transfer matches"));
+		assert!(report.contains("block=100 hash=0x5555...555555 action=detected matches=2"));
+		assert!(report.contains("|  1. token=0x1111...111111 amount=100 log_index=1"));
+		assert!(report.contains("|     from=0x2222...222222 -> to=0x3333...333333"));
+		assert!(report.ends_with(
+			"+------------------------------------------------------------------------"
+		));
+	}
+
+	#[test]
+	fn long_report_preserves_complete_identifiers_by_default() {
+		let block = block(vec![transfer_log(TOKEN, 100, 1)]);
+		let transfers =
+			Erc20TransferPlugin::new(Erc20TransferConfig::new(U256::from(100), [TOKEN]).unwrap())
+				.matching_transfers(&block);
+
+		let report =
+			format_transfer_report(&block, "detected", &transfers, Erc20TransferOutputFormat::Long);
+
+		assert!(report.contains(&block.block_hash().to_string()));
+		assert!(report.contains(&TOKEN.to_string()));
+		assert!(report.contains(&B256::repeat_byte(0x44).to_string()));
+		assert!(!report.contains("..."));
+	}
+
+	#[test]
+	fn includes_every_matching_transfer_in_the_block_report() {
+		let transfers = (0..=20)
+			.map(|index| LargeTransfer {
+				token: TOKEN,
+				from: FROM,
+				to: TO,
+				amount: U256::from(100),
+				transaction_hash: B256::repeat_byte(0x44),
+				log_index: index as u64,
+			})
+			.collect::<Vec<_>>();
+
+		let report = format_transfer_report(
+			&block(Vec::new()),
+			"detected",
+			&transfers,
+			Erc20TransferOutputFormat::Long,
+		);
+
+		assert!(report.contains("|  1. token="));
+		assert!(report.contains("| 21. token="));
+		assert!(!report.contains("not shown"));
 	}
 
 	#[test]

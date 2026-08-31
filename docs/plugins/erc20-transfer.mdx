@@ -1,6 +1,6 @@
 ---
 title: "ERC-20 transfer"
-description: "Configure and operate Raven's statically linked large ERC-20 transfer plugin."
+description: "Install, configure, and operate Raven's bundled large ERC-20 transfer plugin."
 ---
 
 The ERC-20 transfer plugin detects token transfers at or above a configured
@@ -32,21 +32,22 @@ flowchart LR
     block --> runtime[Raven runtime]
     runtime --> plugin[erc20-transfer plugin]
     plugin --> filter[Token and amount filters]
-    filter --> output[Structured tracing output]
+    filter --> report[One block-scoped terminal report]
 ```
 
 Keeping RPC access in the source means the same plugin can process normalized
 events from another source implementation without changing its detection logic.
 
-## Enable the plugin
+## Install the plugin
 
-The plugin is compiled into `raven run` but disabled by default. Enable it with
-an inclusive raw-unit threshold:
+The plugin is bundled with Raven but inactive by default. Install it into
+Raven's persisted configuration with an inclusive raw-unit threshold, then run
+Raven without plugin-specific arguments:
 
 ```bash
-raven run \
-  --rpc-url http://localhost:8545 \
-  --erc20-transfer-min-amount 1000000000000000000000
+raven plugins install erc20-transfer \
+  --min-amount 1000000000000000000000
+raven run --rpc-url http://localhost:8545
 ```
 
 This configuration accepts matching transfers from any emitting contract.
@@ -57,10 +58,9 @@ Values are paired by position. This example matches transfers at or above
 `1_000_000` for token A and at or above `5_000_000` for token B:
 
 ```bash
-raven run \
-  --rpc-url http://localhost:8545 \
-  --erc20-transfer-min-amount 1000000 5000000 \
-  --erc20-token 0x1111111111111111111111111111111111111111 0x2222222222222222222222222222222222222222
+raven plugins install erc20-transfer \
+  --min-amount 1000000 5000000 \
+  --token 0x1111111111111111111111111111111111111111 0x2222222222222222222222222222222222222222
 ```
 
 ### One threshold for multiple tokens
@@ -69,16 +69,16 @@ A single amount is shared by every listed token. This example matches transfers
 at or above `1_000_000` for both tokens:
 
 ```bash
-raven run \
-  --rpc-url http://localhost:8545 \
-  --erc20-transfer-min-amount 1000000 \
-  --erc20-token 0x1111111111111111111111111111111111111111 0x2222222222222222222222222222222222222222
+raven plugins install erc20-transfer \
+  --min-amount 1000000 \
+  --token 0x1111111111111111111111111111111111111111 0x2222222222222222222222222222222222222222
 ```
 
 | Option | Required | Meaning |
 | --- | --- | --- |
-| `--erc20-transfer-min-amount <RAW_UNITS>...` | Yes | One shared threshold or one positional threshold per token |
-| `--erc20-token <ADDRESS>...` | No | Accepted emitting token contracts in threshold-pairing order |
+| `--min-amount <RAW_UNITS>...` | Yes | One shared threshold or one positional threshold per token |
+| `--token <ADDRESS>...` | No | Accepted emitting token contracts in threshold-pairing order |
+| `--short` | No | Abbreviate identifiers in the block-scoped terminal report |
 
 Every threshold is inclusive, accepts decimal or `0x`-prefixed integer input,
 and must be greater than zero. Multiple thresholds require the same number of
@@ -88,10 +88,18 @@ is supplied. Raven deliberately does not fetch or guess token decimals.
 Configure amounts in each smart contract's smallest unit; for a token with 18
 decimals, `1000000000000000000` represents one whole token.
 
+Installing the plugin again replaces its saved settings. Inspect those values
+with `raven plugins list --details`, or deactivate it with:
+
+```bash
+raven plugins remove erc20-transfer
+```
+
 <Note>
-Enabling or changing the plugin does not replay an existing checkpoint. Use
-`--start <BLOCK>` to backfill from an inclusive block, or keep the default
-`--start resume` to monitor only activity after Raven's durable position.
+Installing or changing the plugin does not replay an existing checkpoint. Use
+`raven run --start <BLOCK>` to backfill from an inclusive block, or keep the
+default `--start resume` to monitor only activity after Raven's durable
+position.
 </Note>
 
 ## Matching rules
@@ -114,6 +122,46 @@ event Transfer(
 A match produces a `LargeTransfer` containing the token contract, sender,
 recipient, raw amount, transaction hash, and block log index. Malformed logs or
 logs with another signature do not produce a transfer.
+
+## Terminal output
+
+When one or more logs match in the same block, the plugin emits one `INFO`
+terminal report rather than a separate line for every transfer. The report
+groups the block number, block hash, event direction, and matching row count
+with every transfer row.
+
+Long format is the default and preserves complete hashes and addresses. Install
+with `--short` when abbreviated identifiers are preferable for terminal
+scanning:
+
+```bash
+raven plugins install erc20-transfer \
+  --min-amount 1000000 \
+  --short
+```
+
+Short output looks like this:
+
+```text
+INFO [ erc20-transfer ] raven_plugin_erc20_transfer: +-- ERC-20 transfer matches ----------------------------------------------
+| block=119117321 hash=0xeced...43044f action=detected matches=2
+|
+|  1. token=0x55d3...197955 amount=6545622802734374999853 log_index=1
+|     from=0xbCE7...1e2823 -> to=0x3669...652050 tx=0x5fce...301ef4
+|  2. token=0x55d3...197955 amount=6727078124999999999989 log_index=4
+|     from=0xbCE7...1e2823 -> to=0x172f...46f849 tx=0x5fce...301ef4
++------------------------------------------------------------------------
+```
+
+One report is one tracing event, so another plugin cannot insert lines between
+its header and rows. Raven lists every matching transfer in the block without a
+row limit. Set the plugin target to `DEBUG` when full, structured per-transfer
+fields are also needed:
+
+```bash
+RUST_LOG=raven=info,raven_plugin_erc20_transfer=debug,raven_source_alloy=info \
+  raven run --rpc-url http://localhost:8545
+```
 
 ## Applied and reverted blocks
 
@@ -138,13 +186,17 @@ block removed by a shallow reorg can therefore produce correction telemetry
 with the original transaction identity. Reverted blocks are delivered from the
 old tip toward the common ancestor before replacement blocks are applied.
 
-Each structured transfer record includes:
+Each displayed row includes these identifiers, either complete in the default
+long format or abbreviated when `--short` was saved during installation:
 
 - `action`: `detected` or `reverted`
 - `block_number` and `block_hash`
 - `token`, `from`, and `to`
 - `amount` in raw units
 - `transaction_hash` and `log_index`
+
+The `DEBUG` records retain the full identifier values as structured tracing
+fields.
 
 ## Register from Rust
 
@@ -212,8 +264,8 @@ state or send network notifications.
 - The plugin reports raw amounts and does not resolve token symbol or decimals.
 - Any contract emitting a correctly encoded ERC-20 `Transfer` signature can match.
 - Tracing is the only sink; webhook and messaging adapters remain planned.
-- Token filters and thresholds are supplied at process startup.
-- Dynamic plugin installation remains planned; this plugin is statically linked.
+- Token filters and thresholds are loaded from persisted configuration at process startup.
+- Separately distributed external-plugin discovery and dynamic loading remain planned; this plugin is bundled with Raven.
 
 ## Test and run
 

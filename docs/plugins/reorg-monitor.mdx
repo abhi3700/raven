@@ -5,7 +5,7 @@ description: "Make Raven's normalized shallow-reorg transitions visible in termi
 
 ## Overview
 
-`reorg-monitor` is a statically linked, opt-in Plugin that writes every
+`reorg-monitor` is a bundled, statically linked Plugin that writes every
 canonical-chain transition Raven delivers to tracing. It is useful for
 observing a live source, verifying a checkpoint/reorg configuration, and as a
 minimal reference for plugins that must correct state after a reorg.
@@ -13,10 +13,13 @@ minimal reference for plugins that must correct state after a reorg.
 Enable it with no additional configuration:
 
 ```bash
-raven run \
-  --rpc-url http://localhost:8545 \
-  --reorg-monitor
+raven plugins install reorg-monitor
+raven run --rpc-url http://localhost:8545
 ```
+
+Installation saves an empty `reorg-monitor` configuration object because the
+plugin has no plugin-specific arguments. Remove it with
+`raven plugins remove reorg-monitor`.
 
 It has no RPC client and does not independently detect forks. The Alloy source
 owns canonical-chain reconciliation, validates block data, then supplies

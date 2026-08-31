@@ -40,11 +40,8 @@ raven run [--rpc-url <URL>] [OPTIONS]
 | `--poll-interval-ms <MS>`           | —              | `4000`       | HTTP(S) block-number poll interval; must be greater than zero |
 | `--reconciliation-interval-ms <MS>` | —              | `30000`      | WS(S) safety reconciliation; must be greater than zero        |
 | `--start <POSITION>`                | —              | `resume`     | `resume`, `latest`, or an inclusive block height              |
-| `--reorg-depth <BLOCKS>`             | —              | `64`         | Canonical ancestry retained for shallow-fork correction       |
-| `--block-fetch-mode <MODE>`          | —              | `batch`      | Block/log retrieval mode: `batch` or `sequential`              |
-| `--reorg-monitor`                    | —              | Disabled     | Report applied and reverted blocks through tracing             |
-| `--erc20-transfer-min-amount <RAW_UNITS>...` | —     | Disabled     | One shared threshold or one positional threshold per token    |
-| `--erc20-token <ADDRESS>...`        | —              | All tokens   | Token contracts in threshold-pairing order                     |
+| `--reorg-depth <BLOCKS>`            | —              | `64`         | Canonical ancestry retained for shallow-fork correction       |
+| `--block-fetch-mode <MODE>`         | —              | `batch`      | Block/log retrieval mode: `batch` or `sequential`             |
 
 Example:
 
@@ -73,18 +70,17 @@ the unacknowledged event on restart.
 
 ### ERC-20 transfer monitor
 
-The `erc20-transfer` plugin is statically linked but disabled until
-`--erc20-transfer-min-amount` is supplied. Thresholds accept decimal or
-`0x`-prefixed `uint256` values and must be greater than zero. Optional
-`--erc20-token` values are typed EVM addresses and require the threshold flag.
-One amount applies to every token; multiple amounts pair positionally with the
-same number of token addresses:
+The `erc20-transfer` plugin is bundled with Raven but runs only after it is
+installed into the persisted configuration. Thresholds accept decimal or
+`0x`-prefixed `uint256` values and must be greater than zero. Token values are
+typed EVM addresses. One amount applies to every token; multiple amounts pair
+positionally with the same number of token addresses:
 
 ```bash
-raven run \
-  --rpc-url https://your-evm-rpc.example \
-  --erc20-transfer-min-amount 1000000 5000000 \
-  --erc20-token 0x1111111111111111111111111111111111111111 0x2222222222222222222222222222222222222222
+raven plugins install erc20-transfer \
+  --min-amount 1000000 5000000 \
+  --token 0x1111111111111111111111111111111111111111 0x2222222222222222222222222222222222222222
+raven run --rpc-url https://your-evm-rpc.example
 ```
 
 The plugin decodes normalized logs supplied by the source; it does not issue
@@ -93,18 +89,19 @@ for matching logs in blocks removed by a shallow reorg. This tracing output is
 the current sink. Webhooks and other production notification adapters remain
 planned.
 
-Enabling or changing this plugin does not retroactively replay an existing
-checkpoint. Use `--start <BLOCK>` when the new configuration must backfill
-historical transfers; use the default `resume` when only future activity is
-required.
+Installing or changing this plugin does not retroactively replay an existing
+checkpoint. Use `raven run --start <BLOCK>` when the new configuration must
+backfill historical transfers; use the default `resume` when only future
+activity is required.
 
 ### Reorg monitor
 
-The `reorg-monitor` plugin is statically linked but disabled until
-`--reorg-monitor` is supplied:
+The `reorg-monitor` plugin is also bundled and activated through persisted
+configuration:
 
 ```bash
-raven run --rpc-url https://your-evm-rpc.example --reorg-monitor
+raven plugins install reorg-monitor
+raven run --rpc-url https://your-evm-rpc.example
 ```
 
 It logs every `BlockApplied` event at `INFO` and every `BlockReverted` event at
@@ -155,7 +152,7 @@ Error: no RPC URL configured
 
 ## `raven plugins list`
 
-Report built-in and external plugins known to the CLI:
+Report plugins known to the CLI and their activation state:
 
 ```bash
 raven plugins list
@@ -165,45 +162,87 @@ Current output:
 
 ```text
 Built-in plugins
-  ● block-logger  bundled with `raven run`
-  ○ erc20-transfer  disabled; enable with `raven run --erc20-transfer-min-amount <RAW_UNITS>`
-  ○ reorg-monitor  disabled; enable with `raven run --reorg-monitor`
+  ● block-logger  always active with `raven run`
+
+Bundled plugins
+  ● erc20-transfer  installed
+  ○ reorg-monitor  not installed
 
 External plugins
-  ○ None installed (installation is planned)
+  ○ Loading support is planned
 ```
 
-The current CLI does not have persistent external-plugin discovery. Built-in
-plugins do not need installation; rows marked `○` are bundled but disabled until
-their enable flag is supplied.
+`Built-in` means Raven always registers the plugin. `Bundled` means its code is
+compiled into Raven but activation and settings are persisted by
+`raven plugins install`. `External` is reserved for separately distributed
+plugins; discovery and dynamic loading are planned but are not implemented.
 
-## Planned plugin commands
+Add `--details` to inspect each plugin's origin, accepted arguments, and saved
+values without opening `config.json`:
 
-`raven plugins install <PLUGIN>` and `raven plugins remove <PLUGIN>` reserve the
-future external-plugin management interface. They currently exit unsuccessfully
-with a concise “not available yet” error and do not modify the system.
-
-For example, trying to install the built-in logger explains that it is already
-part of `raven run`:
-
-```console
-$ raven plugins install blocklogger
-Error: external plugin installation is not available yet
-  requested: blocklogger
-  note: `block-logger` is built into `raven run` and needs no installation
+```bash
+raven plugins list --details
 ```
 
-Other external plugin names report their current status:
+## `raven plugins install`
+
+Persist and activate a bundled plugin. Installing an already-installed plugin
+replaces its saved settings.
+
+### ERC-20 transfer options
+
+```bash
+raven plugins install erc20-transfer \
+  --min-amount <RAW_UNITS>... \
+  [--token <ADDRESS>...] \
+  [--short]
+```
+
+| Option | Required | Description |
+| --- | --- | --- |
+| `--min-amount <RAW_UNITS>...` | Yes | One shared threshold or one positional threshold per token |
+| `--token <ADDRESS>...` | No | Accepted emitting token contracts in threshold-pairing order |
+| `--short` | No | Abbreviate hashes and addresses in each report |
+
+Without `--short`, reports retain complete block hashes, transaction hashes,
+and addresses. The option is saved with the plugin, so `raven run` needs no
+plugin-specific arguments.
+
+### Reorg monitor options
+
+The reorg monitor has no plugin-specific settings:
+
+```bash
+raven plugins install reorg-monitor
+```
+
+Plugin-specific options supplied to a different plugin are rejected instead of
+being silently ignored. `raven plugin ...` is accepted as a singular alias, but
+the documented command is `raven plugins ...`.
+
+## `raven plugins remove`
+
+Deactivate a bundled plugin and remove its saved settings:
+
+```bash
+raven plugins remove erc20-transfer
+raven plugins remove reorg-monitor
+```
+
+The `block-logger` cannot be installed or removed because it is always part of
+`raven run`.
+
+External names still report the unimplemented loading boundary:
 
 ```console
 $ raven plugins install whale-detector
 Error: external plugin installation is not available yet
   requested: whale-detector
-  status: planned
+  status: loading support is planned
 ```
 
-These errors intentionally omit Rust source locations and backtraces from
-normal CLI output.
+These errors intentionally omit Rust source locations and backtraces from normal
+CLI output.
 
 ## `raven doctor`
 
@@ -226,9 +265,10 @@ Validate and persist an RPC endpoint:
 raven config set --rpc-url wss://your-evm-rpc.example
 ```
 
-The command accepts `http`, `https`, `ws`, and `wss` URLs. It writes through a
-temporary file before replacement and uses owner-only file permissions on Unix
-because endpoint URLs may contain provider credentials.
+The command accepts `http`, `https`, `ws`, and `wss` URLs. It preserves installed
+plugin settings, writes through a temporary file before replacement, and uses
+owner-only file permissions on Unix because endpoint URLs may contain provider
+credentials.
 
 ## `raven config get`
 
@@ -250,7 +290,8 @@ temporary `NODE_RPC_URL` override.
 
 ## `raven config clear`
 
-Remove all persisted Raven configuration:
+Remove all persisted Raven configuration, including the RPC URL and bundled
+plugin installations:
 
 ```bash
 raven config clear
@@ -296,13 +337,18 @@ observe the same block:
 
 ```text
 2026-08-31T08:10:33.010953Z  INFO [ block-logger ] raven::runner: processed block block_number=119117087 ...
-2026-08-31T08:10:33.012144Z  INFO [ erc20-transfer ] raven_plugin_erc20_transfer: large ERC-20 transfer ...
+2026-08-31T08:10:33.012144Z  INFO [ erc20-transfer ] raven_plugin_erc20_transfer: +-- ERC-20 transfer matches ---
+| block=119117087 hash=0x594c...f29e53 action=detected matches=2
+|  1. token=0x1111...111111 amount=1000000 log_index=4
+|     from=0xaaaa...aaaaaa -> to=0xbbbb...bbbbbb tx=0xcccc...cccccc
++------------------------------------------------------------------------
 2026-08-31T08:10:33.013998Z  WARN [ reorg-monitor ] raven_plugin_reorg_monitor: block left canonical chain; shallow reorg detected ...
 ```
 
-The tag is the visual boundary for consecutive lines from one plugin; Raven
-keeps individual tracing events on one terminal line. Colors are deterministic
-for the same plugin registration order and are distinct for the first 360
-registered plugins. Source, runtime, checkpoint, and CLI orchestration logs do
-not receive a plugin tag. With `NO_COLOR` or redirected output, the same
-`[ plugin-name ]` text remains without ANSI color.
+The tag is the visual boundary for output from one plugin. Most tracing events
+occupy one terminal line; the ERC-20 transfer plugin intentionally emits each
+matching block as one multiline report so its rows cannot interleave with other
+plugins. Colors are deterministic for the same plugin registration order and
+are distinct for the first 360 registered plugins. Source, runtime, checkpoint,
+and CLI orchestration logs do not receive a plugin tag. With `NO_COLOR` or
+redirected output, the same `[ plugin-name ]` text remains without ANSI color.
