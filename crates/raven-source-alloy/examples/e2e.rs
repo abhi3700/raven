@@ -11,13 +11,22 @@
 //!     ↓
 //! Runtime::process
 //!     ↓
-//! BlockLoggerPlugin
+//! BlockLoggerPlugin + optional Erc20TransferPlugin
 //! ```
 //!
 //! Run with:
 //!
 //! ```sh
 //! NODE_RPC_URL=https://your-evm-rpc.example \
+//! cargo run -p raven-source-alloy --example e2e
+//! ```
+//!
+//! Enable the transfer monitor with a raw-unit threshold and optionally one token contract:
+//!
+//! ```sh
+//! NODE_RPC_URL=https://your-evm-rpc.example \
+//! ERC20_TRANSFER_MIN_AMOUNT=1000000000000000000000 \
+//! ERC20_TOKEN_ADDRESS=0x1111111111111111111111111111111111111111 \
 //! cargo run -p raven-source-alloy --example e2e
 //! ```
 //!
@@ -30,9 +39,11 @@
 
 use std::{env, time::Duration};
 
+use alloy_primitives::{Address, U256};
 use async_trait::async_trait;
-use eyre::WrapErr;
+use eyre::{WrapErr, bail};
 use raven_core::ChainEvent;
+use raven_plugin_erc20_transfer::{Erc20TransferConfig, Erc20TransferPlugin};
 use raven_plugin_sdk::{Plugin, PluginContext, PluginMetadata, PluginResult};
 use raven_runtime::Runtime;
 use raven_source_alloy::AlloySource;
@@ -94,6 +105,7 @@ async fn main() -> eyre::Result<()> {
 	let rpc_url = env::var("NODE_RPC_URL").wrap_err(
 		"NODE_RPC_URL is required; provide any EVM-compatible HTTP(S) or WS(S) endpoint",
 	)?;
+	let mut transfer_config = transfer_config_from_env()?;
 
 	let (event_sender, mut event_receiver) = mpsc::channel(EVENT_CHANNEL_CAPACITY);
 
@@ -119,6 +131,9 @@ async fn main() -> eyre::Result<()> {
 							let chain_id = event.chain_id();
 							let mut discovered_runtime = Runtime::new(chain_id);
 							discovered_runtime.register_plugin(BlockLoggerPlugin)?;
+							if let Some(config) = transfer_config.take() {
+								discovered_runtime.register_plugin(Erc20TransferPlugin::new(config))?;
+							}
 							discovered_runtime.start().await?;
 							runtime = Some(discovered_runtime);
 						}
@@ -155,6 +170,29 @@ async fn main() -> eyre::Result<()> {
 
 	source_result?;
 	shutdown_result
+}
+
+fn transfer_config_from_env() -> eyre::Result<Option<Erc20TransferConfig>> {
+	let minimum_amount = match env::var("ERC20_TRANSFER_MIN_AMOUNT") {
+		Ok(value) => value
+			.parse::<U256>()
+			.wrap_err("ERC20_TRANSFER_MIN_AMOUNT must be a decimal or 0x-prefixed uint256 value")?,
+		Err(env::VarError::NotPresent) => {
+			if env::var_os("ERC20_TOKEN_ADDRESS").is_some() {
+				bail!("ERC20_TOKEN_ADDRESS requires ERC20_TRANSFER_MIN_AMOUNT");
+			}
+			return Ok(None);
+		},
+		Err(error) => return Err(error.into()),
+	};
+
+	let token_addresses = match env::var("ERC20_TOKEN_ADDRESS") {
+		Ok(value) => vec![value.parse::<Address>().wrap_err("invalid ERC20_TOKEN_ADDRESS")?],
+		Err(env::VarError::NotPresent) => Vec::new(),
+		Err(error) => return Err(error.into()),
+	};
+
+	Ok(Some(Erc20TransferConfig::new(minimum_amount, token_addresses)?))
 }
 
 fn init_tracing() {

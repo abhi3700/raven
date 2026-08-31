@@ -24,6 +24,7 @@ pub trait Plugin: Send + Sync {
 
 #[cfg(test)]
 mod tests {
+	use alloy_primitives::B256;
 	use async_trait::async_trait;
 	use raven_core::{BlockEvent, ChainEvent, ChainId};
 
@@ -71,8 +72,8 @@ mod tests {
 		BlockEvent::new(
 			ChainId::new(8_453).expect("test chain ID should be valid"),
 			21_000_000,
-			"0x1111111111111111111111111111111111111111111111111111111111111111",
-			"0x2222222222222222222222222222222222222222222222222222222222222222",
+			B256::repeat_byte(0x11),
+			B256::repeat_byte(0x22),
 			1_720_000_000,
 			150,
 		)
@@ -83,8 +84,8 @@ mod tests {
 		BlockEvent::new(
 			ChainId::new(8_453).expect("test chain ID should be valid"),
 			21_000_001,
-			"0x1111111111111111111111111111111111111111111111111111111111111111",
-			"0x2222222222222222222222222222222222222222222222222222222222222222",
+			B256::repeat_byte(0x11),
+			B256::repeat_byte(0x22),
 			1_720_000_001,
 			150,
 		)

@@ -41,6 +41,9 @@ raven run [--rpc-url <URL>] [OPTIONS]
 | `--reconciliation-interval-ms <MS>` | —              | `30000`      | WS(S) safety reconciliation; must be greater than zero        |
 | `--start <POSITION>`                | —              | `resume`     | `resume`, `latest`, or an inclusive block height              |
 | `--reorg-depth <BLOCKS>`             | —              | `64`         | Canonical ancestry retained for shallow-fork correction       |
+| `--block-fetch-mode <MODE>`          | —              | `batch`      | Block/log retrieval mode: `batch` or `sequential`              |
+| `--erc20-transfer-min-amount <RAW_UNITS>...` | —     | Disabled     | One shared threshold or one positional threshold per token    |
+| `--erc20-token <ADDRESS>...`        | —              | All tokens   | Token contracts in threshold-pairing order                     |
 
 Example:
 
@@ -56,11 +59,43 @@ hard-coded allowlist. HTTP(S) uses the polling interval. WS(S) uses
 `eth_subscribe("newHeads")` as its primary trigger and the reconciliation
 interval as a safety check. Both feed the same ordered full-block catch-up path.
 
+`batch` sends `eth_getBlockByNumber` and a same-height `eth_getLogs` call in one
+JSON-RPC packet, then validates the returned block and logs together. Use
+`--block-fetch-mode sequential` when an endpoint rejects batch packets or an
+operator wants the original block-first, hash-pinned log request.
+
 The default `--start resume` loads a chain-specific checkpoint. If none exists,
 it starts at the current head. `latest` deliberately ignores the checkpoint;
 a numeric value backfills from that block inclusively. The checkpoint advances
 only after every plugin reports success, so a crash or plugin failure replays
 the unacknowledged event on restart.
+
+### ERC-20 transfer monitor
+
+The `erc20-transfer` plugin is statically linked but disabled until
+`--erc20-transfer-min-amount` is supplied. Thresholds accept decimal or
+`0x`-prefixed `uint256` values and must be greater than zero. Optional
+`--erc20-token` values are typed EVM addresses and require the threshold flag.
+One amount applies to every token; multiple amounts pair positionally with the
+same number of token addresses:
+
+```bash
+raven run \
+  --rpc-url https://your-evm-rpc.example \
+  --erc20-transfer-min-amount 1000000 5000000 \
+  --erc20-token 0x1111111111111111111111111111111111111111 0x2222222222222222222222222222222222222222
+```
+
+The plugin decodes normalized logs supplied by the source; it does not issue
+RPC requests. It logs `action=detected` for applied blocks and `action=reverted`
+for matching logs in blocks removed by a shallow reorg. This tracing output is
+the current sink. Webhooks and other production notification adapters remain
+planned.
+
+Enabling or changing this plugin does not retroactively replay an existing
+checkpoint. Use `--start <BLOCK>` when the new configuration must backfill
+historical transfers; use the default `resume` when only future activity is
+required.
 
 ### Why there is no `--source`
 
@@ -113,14 +148,16 @@ Current output:
 
 ```text
 Built-in plugins
-  block-logger  bundled with `raven run`
+  ● block-logger  bundled with `raven run`
+  ○ erc20-transfer  disabled; enable with `raven run --erc20-transfer-min-amount <RAW_UNITS>`
 
 External plugins
-  None installed (installation is planned)
+  ○ None installed (installation is planned)
 ```
 
-The current CLI does not have persistent external-plugin discovery. The
-built-in `block-logger` used by `raven run` does not need to be installed.
+The current CLI does not have persistent external-plugin discovery. Built-in
+plugins do not need installation; rows marked `○` are bundled but disabled until
+their enable flag is supplied.
 
 ## Planned plugin commands
 

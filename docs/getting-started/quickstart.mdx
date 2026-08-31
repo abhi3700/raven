@@ -58,11 +58,36 @@ raven config clear
 
 Raven calls `eth_chainId` and accepts any non-zero EIP-155 chain ID. It uses the
 detected chain ID to load a per-chain checkpoint and initialize the runtime;
-every plugin receives that ID through `PluginContext`. Raven then
-fetches full blocks and passes normalized events through the runtime. HTTP(S)
+every plugin receives that ID through `PluginContext`. Raven then fetches each
+block and its logs in one validated JSON-RPC batch by default before passing
+normalized events through the runtime. Set `--block-fetch-mode sequential` to
+use the original hash-pinned two-request strategy. HTTP(S)
 endpoints use block-number polling. WS(S) endpoints use `newHeads`
 subscriptions for immediate notification plus a slower safety reconciliation.
 The CLI's built-in `block-logger` plugin logs each processed block.
+
+## Monitor large ERC-20 transfers
+
+Set an inclusive amount threshold in the token's raw smallest unit:
+
+```bash
+raven run \
+  --rpc-url http://localhost:8545 \
+  --erc20-transfer-min-amount 1000000000000000000000 \
+  --erc20-token 0x1111111111111111111111111111111111111111 0x2222222222222222222222222222222222222222
+```
+
+`--erc20-transfer-min-amount` enables the statically linked monitor. List
+several contracts after one `--erc20-token` flag, or omit it to inspect valid
+ERC-20 `Transfer` logs from all contracts. One amount applies to every listed
+token; multiple amounts pair positionally with the same number of addresses.
+Amounts are deliberately not decimal-adjusted because token decimals belong to
+each smart contract.
+
+The plugin reads only `BlockEvent.logs()` and never polls the chain. It reports
+matching applied transfers through tracing. If a retained block is removed by a
+shallow reorg, Raven sends the same log payload as `BlockReverted` and the plugin
+reports those matches with `action=reverted`.
 
 There is no `--source alloy` option. Alloy is the current Rust implementation
 of RPC ingestion, not a deployment choice. Raven infers HTTP polling versus

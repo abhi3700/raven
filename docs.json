@@ -48,6 +48,18 @@
         ]
       },
       {
+        "group": "Plugins",
+        "pages": [
+          "docs/plugins/erc20-transfer"
+        ]
+      },
+      {
+        "group": "Contribute",
+        "pages": [
+          "docs/development/contributing"
+        ]
+      },
+      {
         "group": "Reference",
         "pages": [
           "docs/reference/cli",

@@ -14,6 +14,38 @@ const LOGO_LINES: [&str; 6] = [
 const LOGO_GRADIENT: [(u8, u8, u8); 6] =
 	[(8, 116, 209), (12, 126, 224), (22, 139, 255), (35, 148, 255), (66, 165, 255), (96, 178, 255)];
 
+const ERC20_TRANSFER_DISABLED_HINT: &str =
+	"disabled; enable with `raven run --erc20-transfer-min-amount <RAW_UNITS>`";
+
+const BUILT_IN_PLUGIN_ROWS: &[BuiltInPluginRow] = &[
+	BuiltInPluginRow {
+		marker: "●",
+		name: "block-logger",
+		detail: "bundled with `raven run`",
+		style: BuiltInPluginStyle::Active,
+	},
+	BuiltInPluginRow {
+		marker: "○",
+		name: "erc20-transfer",
+		detail: ERC20_TRANSFER_DISABLED_HINT,
+		style: BuiltInPluginStyle::Disabled,
+	},
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct BuiltInPluginRow {
+	marker: &'static str,
+	name: &'static str,
+	detail: &'static str,
+	style: BuiltInPluginStyle,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BuiltInPluginStyle {
+	Active,
+	Disabled,
+}
+
 pub(crate) fn print_error(error: &eyre::Report) {
 	let rendered = format!("{error:#}");
 	let mut lines = rendered.lines();
@@ -57,12 +89,22 @@ pub(crate) fn print_doctor(
 
 pub(crate) fn print_plugins() {
 	println!("{}", "Built-in plugins".bright_blue().bold());
-	println!(
-		"  {} {}  {}",
-		"●".bright_green(),
-		"block-logger".bright_cyan().bold(),
-		"bundled with `raven run`".dimmed()
-	);
+	for row in BUILT_IN_PLUGIN_ROWS {
+		match row.style {
+			BuiltInPluginStyle::Active => println!(
+				"  {} {}  {}",
+				row.marker.bright_green(),
+				row.name.bright_cyan().bold(),
+				row.detail.dimmed()
+			),
+			BuiltInPluginStyle::Disabled => println!(
+				"  {} {}  {}",
+				row.marker.bright_black(),
+				row.name.bright_black(),
+				row.detail.bright_black()
+			),
+		}
+	}
 	println!();
 	println!("{}", "External plugins".bright_blue().bold());
 	println!("  {} {}", "○".bright_yellow(), "None installed (installation is planned)".yellow());
@@ -106,4 +148,22 @@ fn print_path(path: &Path) {
 
 fn print_field(label: &str, value: &impl std::fmt::Display) {
 	println!("{} {value}", format!("{label}:").bright_blue().bold());
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn plugin_list_shows_erc20_transfer_as_disabled_builtin() {
+		let row = BUILT_IN_PLUGIN_ROWS
+			.iter()
+			.find(|row| row.name == "erc20-transfer")
+			.expect("erc20-transfer should be listed as a built-in plugin");
+
+		assert_eq!(row.marker, "○");
+		assert_eq!(row.style, BuiltInPluginStyle::Disabled);
+		assert_eq!(row.detail, ERC20_TRANSFER_DISABLED_HINT);
+		assert!(row.detail.contains("raven run --erc20-transfer-min-amount"));
+	}
 }

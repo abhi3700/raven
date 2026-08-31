@@ -40,9 +40,9 @@ async fn run_cli() -> Result<()> {
 			},
 
 			PluginCommand::Install { name } => {
-				if is_block_logger(&name) {
+				if let Some(built_in) = built_in_plugin(&name) {
 					bail!(
-						"external plugin installation is not available yet\n  requested: {name}\n  note: `block-logger` is built into `raven run` and needs no installation"
+						"external plugin installation is not available yet\n  requested: {name}\n  note: `{built_in}` is built into `raven run` and needs no installation"
 					);
 				}
 
@@ -92,6 +92,16 @@ fn is_block_logger(name: &str) -> bool {
 	matches!(name, "block-logger" | "blocklogger")
 }
 
+fn built_in_plugin(name: &str) -> Option<&'static str> {
+	if is_block_logger(name) {
+		Some("block-logger")
+	} else if matches!(name, "erc20-transfer" | "erc20transfer") {
+		Some("erc20-transfer")
+	} else {
+		None
+	}
+}
+
 fn handle_config_command(command: ConfigCommand) -> Result<()> {
 	match command {
 		ConfigCommand::Set { rpc_url } => {
@@ -120,5 +130,12 @@ mod tests {
 		assert!(is_block_logger("block-logger"));
 		assert!(is_block_logger("blocklogger"));
 		assert!(!is_block_logger("whale-detector"));
+	}
+
+	#[test]
+	fn recognizes_built_in_plugins() {
+		assert_eq!(built_in_plugin("blocklogger"), Some("block-logger"));
+		assert_eq!(built_in_plugin("erc20-transfer"), Some("erc20-transfer"));
+		assert_eq!(built_in_plugin("whale-detector"), None);
 	}
 }

@@ -175,7 +175,9 @@ head notification or reconciliation returns target N
     ├─► compare retained tip/ancestors with canonical RPC blocks
     ├─► if forked: emit BlockReverted from old tip to common ancestor
     └─► for every replacement or missing height through N
-            ├─► eth_getBlockByNumber(height)
+            ├─► batch (default): eth_getBlockByNumber + eth_getLogs(height..=height)
+            ├─► sequential: eth_getBlockByNumber, then eth_getLogs(blockHash)
+            ├─► validate block number, log hashes, and aggregate logs bloom
             ├─► verify parent linkage
             ├─► emit ChainEvent::BlockApplied
             └─► retain it in the bounded canonical window
@@ -380,10 +382,12 @@ source cursor (optimistic, in memory)
 
 The checkpoint is stored as versioned JSON under Raven's config directory at
 `checkpoints/<chain-id>.json`. It contains the bounded canonical `BlockEvent`
-window, not merely a height, so resume can verify hashes and detect a shallow
-fork. Writes use a temporary file, file sync, atomic rename, and directory sync
-on Unix. A crash after plugin success but before durable rename causes safe
-replay; a checkpoint is never moved ahead of plugin success.
+window, including normalized logs, not merely a height. Resume can therefore
+verify hashes, detect a shallow fork, and send the original log payload back to
+plugins when reverting a retained block. Writes use a temporary file, file sync,
+atomic rename, and directory sync on Unix. A crash after plugin success but
+before durable rename causes safe replay; a checkpoint is never moved ahead of
+plugin success.
 
 `raven run --start resume` is the default. It resumes after the stored tip, or
 starts at the current head when no checkpoint exists. `--start latest` ignores

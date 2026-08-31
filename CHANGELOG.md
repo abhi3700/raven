@@ -4,11 +4,39 @@ This changelog summarizes Raven's committed development history by ISO calendar
 week. Weeks run from Monday through Sunday, all commit timestamps and calendar
 groupings are normalized to UTC, and the newest week appears first.
 
-Only committed work is included. Exact commit titles and links are retained
-under each active week so every summary can be traced back to Git history. This
-snapshot covers the repository from its inception through commit
+The dated weekly history includes only committed work. Exact commit titles and
+links are retained under each active week so every summary can be traced back
+to Git history; `Unreleased` tracks current changes before their first release.
+This snapshot covers the repository from its inception through commit
 [`12ad8b7`](https://github.com/abhi3700/raven/commit/12ad8b7f72812d639db08df8c826c1cbc10b9821)
 on August 25, 2026 (UTC).
+
+## Unreleased
+
+### Added
+
+- Added typed, validated EVM logs to normalized block events. The Alloy source
+  fetches blocks and logs in one consistency-checked JSON-RPC batch by default,
+  preserves hash-pinned sequential retrieval as an explicit mode, and retains
+  logs for matching reorg reversals.
+- Added the statically linked `erc20-transfer` plugin with shared or positional
+  per-token raw-unit thresholds, optional token-contract filters, correction
+  telemetry, deterministic tests, and an opt-in live RPC example.
+- Added a dedicated Plugins documentation section, starting with the ERC-20
+  transfer plugin's configuration, matching, reorg, and delivery semantics.
+- Added a concise contribution guide covering Raven fundamentals, plugin
+  creation and tests, documentation, validation, pull requests, and review.
+
+### Changed
+
+- Replaced string block and parent hashes with `alloy_primitives::B256` while
+  preserving their `0x`-prefixed JSON representation.
+- Extended `raven run` with `--erc20-transfer-min-amount` and repeatable
+  `--erc20-token` options.
+- Updated `raven plugins list` to show disabled built-in plugins with their
+  enable command, starting with `erc20-transfer`.
+- Established `crates/plugins/<plugin>/` as the workspace layout for static
+  plugin crates and moved `raven-plugin-erc20-transfer` into it.
 
 ## 2026-W35 (August 24-30, 2026)
 

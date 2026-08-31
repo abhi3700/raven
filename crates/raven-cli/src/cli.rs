@@ -1,9 +1,11 @@
 use std::str::FromStr;
 
+use alloy_primitives::{Address, U256};
 use clap::{
-	Args, Parser, Subcommand,
+	Args, Parser, Subcommand, ValueEnum,
 	builder::styling::{AnsiColor, Effects, Styles},
 };
+use raven_source_alloy::BlockFetchMode;
 
 const RAVEN_STYLES: Styles = Styles::styled()
 	.header(AnsiColor::BrightBlue.on_default().effects(Effects::BOLD))
@@ -73,6 +75,18 @@ pub(crate) struct RunArgs {
 	/// Number of recent canonical blocks retained for shallow reorgs.
 	#[arg(long, default_value_t = 64, value_parser = parse_positive_usize)]
 	pub(crate) reorg_depth: usize,
+
+	/// Retrieve each block and its logs using `batch` or `sequential` RPC requests.
+	#[arg(long, value_enum, default_value = "batch")]
+	pub(crate) block_fetch_mode: BlockFetchModeArg,
+
+	/// Enable ERC-20 monitoring with one shared threshold or one threshold per token.
+	#[arg(long, num_args = 1.., value_name = "RAW_UNITS", value_parser = parse_positive_u256)]
+	pub(crate) erc20_transfer_min_amount: Option<Vec<U256>>,
+
+	/// Restrict ERC-20 monitoring to these token contracts.
+	#[arg(long, num_args = 1.., value_name = "ADDRESS", requires = "erc20_transfer_min_amount")]
+	pub(crate) erc20_token: Vec<Address>,
 }
 
 /// RPC checks performed by `raven doctor`.
@@ -95,6 +109,22 @@ pub(crate) enum StartArg {
 	Block(u64),
 }
 
+/// CLI representation of Raven's block/log RPC retrieval strategy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum BlockFetchModeArg {
+	Batch,
+	Sequential,
+}
+
+impl From<BlockFetchModeArg> for BlockFetchMode {
+	fn from(value: BlockFetchModeArg) -> Self {
+		match value {
+			BlockFetchModeArg::Batch => Self::Batch,
+			BlockFetchModeArg::Sequential => Self::Sequential,
+		}
+	}
+}
+
 impl FromStr for StartArg {
 	type Err = String;
 
@@ -113,6 +143,16 @@ impl FromStr for StartArg {
 fn parse_positive_usize(value: &str) -> Result<usize, String> {
 	let value = value.parse::<usize>().map_err(|_| "expected a positive integer".to_owned())?;
 	if value == 0 {
+		return Err("value must be greater than zero".to_owned());
+	}
+	Ok(value)
+}
+
+fn parse_positive_u256(value: &str) -> Result<U256, String> {
+	let value = value
+		.parse::<U256>()
+		.map_err(|_| "expected a decimal or 0x-prefixed integer fitting uint256".to_owned())?;
+	if value.is_zero() {
 		return Err("value must be greater than zero".to_owned());
 	}
 	Ok(value)
@@ -190,6 +230,19 @@ mod tests {
 		assert_eq!(args.reconciliation_interval_ms, 30_000);
 		assert_eq!(args.start, StartArg::Resume);
 		assert_eq!(args.reorg_depth, 64);
+		assert_eq!(args.block_fetch_mode, BlockFetchModeArg::Batch);
+		assert!(args.erc20_transfer_min_amount.is_none());
+		assert!(args.erc20_token.is_empty());
+	}
+
+	#[test]
+	fn parses_sequential_block_fetch_mode() {
+		let cli =
+			Cli::try_parse_from(["raven", "run", "--block-fetch-mode", "sequential"]).unwrap();
+		let Some(Command::Run(args)) = cli.command else { panic!("run expected") };
+
+		assert_eq!(args.block_fetch_mode, BlockFetchModeArg::Sequential);
+		assert_eq!(BlockFetchMode::from(args.block_fetch_mode), BlockFetchMode::Sequential);
 	}
 
 	#[test]
@@ -269,6 +322,62 @@ mod tests {
 		]);
 
 		assert!(result.is_err());
+	}
+
+	#[test]
+	fn parses_erc20_transfer_monitor_configuration() {
+		let cli = Cli::try_parse_from([
+			"raven",
+			"run",
+			"--erc20-transfer-min-amount",
+			"1000000",
+			"5000000",
+			"--erc20-token",
+			"0x1111111111111111111111111111111111111111",
+			"0x2222222222222222222222222222222222222222",
+		])
+		.unwrap();
+		let Some(Command::Run(args)) = cli.command else { panic!("run expected") };
+
+		assert_eq!(
+			args.erc20_transfer_min_amount,
+			Some(vec![U256::from(1_000_000), U256::from(5_000_000)])
+		);
+		assert_eq!(args.erc20_token.len(), 2);
+	}
+
+	#[test]
+	fn parses_one_erc20_threshold_for_multiple_tokens() {
+		let cli = Cli::try_parse_from([
+			"raven",
+			"run",
+			"--erc20-transfer-min-amount",
+			"1000000",
+			"--erc20-token",
+			"0x1111111111111111111111111111111111111111",
+			"0x2222222222222222222222222222222222222222",
+		])
+		.unwrap();
+		let Some(Command::Run(args)) = cli.command else { panic!("run expected") };
+
+		assert_eq!(args.erc20_transfer_min_amount, Some(vec![U256::from(1_000_000)]));
+		assert_eq!(args.erc20_token.len(), 2);
+	}
+
+	#[test]
+	fn rejects_erc20_token_without_threshold_and_zero_threshold() {
+		assert!(
+			Cli::try_parse_from([
+				"raven",
+				"run",
+				"--erc20-token",
+				"0x1111111111111111111111111111111111111111",
+			])
+			.is_err()
+		);
+		assert!(
+			Cli::try_parse_from(["raven", "run", "--erc20-transfer-min-amount", "0",]).is_err()
+		);
 	}
 
 	#[test]

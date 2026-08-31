@@ -16,6 +16,9 @@ what the repository actually supports today.
   worker isolation, delivery outcomes, and runtime health.
 - `crates/raven-plugin-sdk` owns the public plugin contract, context, metadata,
   and example plugin surface.
+- `crates/plugins/<plugin>` contains individually packaged, statically linked
+  Raven plugins. Keep each plugin in its own crate and preserve the
+  `raven-plugin-*` package naming convention.
 - `crates/raven-source-alloy` owns Alloy-backed HTTP/WebSocket JSON-RPC
   ingestion, source-native conversion, retry/reconciliation, and reorg emission.
 - `crates/raven-cli` owns Clap UX, config resolution, source/runtime
@@ -52,11 +55,21 @@ logic should stay in `raven-source-alloy`.
 - Use the repository term `Plugin` for the extension contract. Avoid replacing
   it with `processor` unless the code architecture changes.
 - Keep Mintlify routes and navigation valid when adding or moving docs.
+- Give every user-facing crate under `crates/plugins/<plugin>/` a corresponding
+  `docs/plugins/<plugin>.mdx` page and register it in the `Plugins` group in
+  `docs.json`.
+- Keep `docs/development/contributing.mdx` synchronized with the plugin layout,
+  validation commands, documentation requirements, and contribution workflow.
 
 ## CLI And Runtime Behavior
 
 - `raven run` is standalone JSON-RPC ingestion through the Alloy-backed source.
   The URL scheme selects HTTP polling or WebSocket subscription behavior.
+- Block/log retrieval defaults to a validated JSON-RPC batch. Preserve the
+  explicit hash-pinned sequential mode for endpoint compatibility and rollback.
+- ERC-20 CLI thresholds are inclusive. One minimum amount applies to every
+  listed token; multiple amounts pair positionally with the same number of
+  token addresses.
 - RPC URL resolution is: explicit `--rpc-url`, then `NODE_RPC_URL`, then
   persisted config.
 - Checkpoints are CLI-owned durable acknowledgement state. They advance only

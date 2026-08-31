@@ -9,6 +9,7 @@
 //! events from Raven's RPC source, making it a good reference for writing
 //! custom Raven plugins.
 
+use alloy_primitives::B256;
 use async_trait::async_trait;
 use eyre::Result;
 use raven_core::{BlockEvent, ChainEvent, ChainId};
@@ -27,8 +28,8 @@ async fn main() -> Result<()> {
 	let block = BlockEvent::new(
 		chain_id,
 		21_000_000,
-		"0x1111111111111111111111111111111111111111111111111111111111111111",
-		"0x2222222222222222222222222222222222222222222222222222222222222222",
+		B256::repeat_byte(0x11),
+		B256::repeat_byte(0x22),
 		1_720_000_000,
 		150,
 	)?;

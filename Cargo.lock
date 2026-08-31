@@ -3250,11 +3250,13 @@ dependencies = [
 name = "raven"
 version = "0.1.0"
 dependencies = [
+ "alloy-primitives",
  "async-trait",
  "clap",
  "colored",
  "eyre",
  "raven-core",
+ "raven-plugin-erc20-transfer",
  "raven-plugin-sdk",
  "raven-runtime",
  "raven-source-alloy",
@@ -3277,9 +3279,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "raven-plugin-erc20-transfer"
+version = "0.1.0"
+dependencies = [
+ "alloy-primitives",
+ "alloy-sol-types",
+ "async-trait",
+ "raven-core",
+ "raven-plugin-sdk",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "raven-plugin-sdk"
 version = "0.1.0"
 dependencies = [
+ "alloy-primitives",
  "async-trait",
  "eyre",
  "raven-core",
@@ -3291,6 +3308,7 @@ dependencies = [
 name = "raven-runtime"
 version = "0.1.0"
 dependencies = [
+ "alloy-primitives",
  "async-trait",
  "futures-util",
  "raven-core",
@@ -3304,11 +3322,13 @@ name = "raven-source-alloy"
 version = "0.1.0"
 dependencies = [
  "alloy",
+ "alloy-primitives",
  "async-trait",
  "dotenvy",
  "eyre",
  "futures-util",
  "raven-core",
+ "raven-plugin-erc20-transfer",
  "raven-plugin-sdk",
  "raven-runtime",
  "thiserror",

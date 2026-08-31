@@ -23,11 +23,12 @@
 //! durable resume point
 //! ```
 //!
-//! The checkpoint retains a bounded, oldest-to-newest window of block headers rather than only a
+//! The checkpoint retains a bounded, oldest-to-newest window of block payloads rather than only a
 //! block number. Block hashes and parent hashes let Raven verify ancestry and represent a shallow
-//! reorganization as stack operations: an applied block must extend the current tip, while a
-//! reverted block must exactly match and remove the current tip. Keeping one file per chain and
-//! validating its chain ID also prevents progress from one EVM chain being reused on another.
+//! reorganization as stack operations; retained logs let plugins receive the same data on apply
+//! and revert. An applied block must extend the current tip, while a reverted block must exactly
+//! match and remove the current tip. Keeping one file per chain and validating its chain ID also
+//! prevents progress from one EVM chain being reused on another.
 //!
 //! Persistence uses a temporary file followed by an atomic rename. A crash before the rename leaves
 //! the previous checkpoint authoritative, which may replay work but must not skip it. Consequently,
@@ -255,6 +256,8 @@ fn save_to(path: &Path, checkpoint: &Checkpoint) -> Result<()> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use alloy_primitives::{Address, B256, Bytes};
+	use raven_core::EvmLog;
 	use std::sync::atomic::{AtomicU64, Ordering};
 
 	static NEXT_TEST_FILE: AtomicU64 = AtomicU64::new(1);
@@ -263,10 +266,32 @@ mod tests {
 		BlockEvent::new(
 			ChainId::new(8453).unwrap(),
 			number,
-			format!("0x{hash:064x}"),
-			format!("0x{parent:064x}"),
+			format!("0x{hash:064x}").parse::<B256>().unwrap(),
+			format!("0x{parent:064x}").parse::<B256>().unwrap(),
 			1,
 			0,
+		)
+		.unwrap()
+	}
+
+	fn block_with_log(number: u64, hash: u64, parent: u64) -> BlockEvent {
+		let log = EvmLog::new(
+			Address::repeat_byte(0x11),
+			vec![B256::repeat_byte(0x22)],
+			Bytes::from_static(&[0x33]),
+			B256::repeat_byte(0x44),
+			0,
+			0,
+		)
+		.unwrap();
+		BlockEvent::new_with_logs(
+			ChainId::new(8453).unwrap(),
+			number,
+			format!("0x{hash:064x}").parse::<B256>().unwrap(),
+			format!("0x{parent:064x}").parse::<B256>().unwrap(),
+			1,
+			1,
+			vec![log],
 		)
 		.unwrap()
 	}
@@ -344,7 +369,9 @@ mod tests {
 		));
 		let mut checkpoint = Checkpoint::empty(ChainId::new(8453).unwrap());
 		checkpoint.apply(&ChainEvent::BlockApplied(block(10, 10, 9)), 64).unwrap();
-		checkpoint.apply(&ChainEvent::BlockApplied(block(11, 11, 10)), 64).unwrap();
+		checkpoint
+			.apply(&ChainEvent::BlockApplied(block_with_log(11, 11, 10)), 64)
+			.unwrap();
 		save_to(&path, &checkpoint).unwrap();
 
 		let restored = load_from(&path)
@@ -354,6 +381,7 @@ mod tests {
 			.unwrap();
 		assert_eq!(restored.blocks.last().unwrap().block_number(), 11);
 		assert_eq!(restored.blocks.last().unwrap().block_hash(), block(11, 11, 10).block_hash());
+		assert_eq!(restored.blocks.last().unwrap().logs().len(), 1);
 		let _ = fs::remove_file(path);
 	}
 }

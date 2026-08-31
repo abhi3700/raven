@@ -3,11 +3,20 @@ title: "Workspace crates"
 description: "Responsibilities and public interfaces for every crate in the Raven workspace."
 ---
 
-Raven is organized as a Cargo workspace with five crates.
+Raven is organized as a Cargo workspace with six crates.
+
+Reusable statically linked plugin crates live under `crates/plugins/<plugin>/`.
+Each plugin keeps its own package manifest, source tree, tests, and dependencies;
+future plugins should follow this layout without changing the public package
+naming convention.
+
+See [Contribute to Raven](/docs/development/contributing) for the plugin
+contribution, validation, and pull request workflow.
 
 | Crate | Kind | Responsibility |
 | --- | --- | --- |
 | `raven-core` | Library | Validated, source-independent chain types |
+| `raven-plugin-erc20-transfer` | Library | Static large ERC-20 transfer detection plugin in `crates/plugins/erc20-transfer` |
 | `raven-plugin-sdk` | Library | Plugin trait, context, metadata, and errors |
 | `raven-runtime` | Library | Plugin registration, lifecycle, validation, and dispatch |
 | `raven-source-alloy` | Library | Alloy-backed JSON-RPC polling, WS subscriptions, reconciliation, and normalization |
@@ -19,11 +28,27 @@ Public exports:
 
 - `ChainId`
 - `BlockEvent`
+- `EvmLog`
 - `ChainEvent`
 - `CoreError`
 
 Use this crate in source adapters, plugins, serialization boundaries, and tests
 that construct normalized events.
+
+## [`raven-plugin-erc20-transfer`](/docs/plugins/erc20-transfer)
+
+Public exports:
+
+- `Erc20TransferConfig`
+- `Erc20TransferPlugin`
+- `Erc20TransferConfigError`
+- `LargeTransfer`
+
+This plugin decodes `Transfer(address,address,uint256)` from normalized block
+logs. It can filter token contract addresses and uses an inclusive raw-unit
+amount threshold. It intentionally has no RPC dependency. See the
+[ERC-20 transfer plugin guide](/docs/plugins/erc20-transfer) for configuration,
+matching, reorg, and delivery semantics.
 
 ## `raven-plugin-sdk`
 
@@ -92,7 +117,7 @@ The binary crate owns:
 - Alloy-backed RPC task creation.
 - Endpoint inspection and runtime initialization from the discovered chain ID.
 - Ctrl+C handling and graceful shutdown.
-- The built-in block logger used by `raven run`.
+- The built-in block logger and opt-in ERC-20 transfer monitor used by `raven run`.
 
 The CLI is an integration layer. Domain types belong in `raven-core` and runtime
 policy belongs in `raven-runtime`.

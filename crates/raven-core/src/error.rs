@@ -11,4 +11,15 @@ pub enum CoreError {
 
 	#[error("block hash and parent hash must differ for non-genesis blocks")]
 	IdenticalBlockAndParentHash,
+
+	#[error("EVM log has {count} topics; at most four are allowed")]
+	TooManyLogTopics { count: usize },
+
+	#[error(
+		"EVM log transaction index {transaction_index} is outside block transaction count {transaction_count}"
+	)]
+	LogTransactionIndexOutOfBounds { transaction_index: u64, transaction_count: u64 },
+
+	#[error("EVM logs must be strictly ordered by transaction index and log index")]
+	InvalidLogOrder,
 }

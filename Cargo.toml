@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "crates/raven-cli",
     "crates/raven-core",
+    "crates/plugins/*",
     "crates/raven-plugin-sdk",
     "crates/raven-runtime",
     "crates/raven-source-alloy",
@@ -25,7 +26,8 @@ alloy = { version = "2.1", features = [
     "rpc-types",
     "reqwest",
 ] }
-alloy-primitives = "1.6.1"
+alloy-primitives = { version = "1.6.1", features = ["serde"] }
+alloy-sol-types = "1.6.0"
 eyre = "0.6.14"
 async-trait = "0.1.92"
 clap = { version = "4.6.6", features = ["derive", "env"] }

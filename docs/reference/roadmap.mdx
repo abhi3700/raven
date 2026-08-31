@@ -50,6 +50,8 @@ overlap when it does not require an undecided contract.
 - [x] RPC-focused `raven run` interface without an implementation-specific source flag
 - [x] Working `raven run` orchestration and Ctrl+C shutdown
 - [x] Built-in block logging
+- [x] Hash-pinned normalized EVM logs in block events
+- [x] Opt-in statically linked large ERC-20 transfer monitor
 - [x] `raven doctor` configuration and bounded RPC connectivity checks
 
 ## Completed milestone: reliable canonical blocks
@@ -98,9 +100,10 @@ source-native data
 
 Planned decisions and work:
 
-- [ ] Decide whether transactions and logs are core variants, optional block
-  payloads, or derived events.
-- [ ] Define a versioning policy for serialized events before durable storage.
+- [x] Keep generic EVM logs as block payloads and derive protocol/token meaning
+  in plugins rather than adding one `ChainEvent` variant per ABI event.
+- [x] Protect current durable checkpoint payloads with the checkpoint schema;
+  require future event stores/replay APIs to use their own versioned envelope.
 - [ ] Add fixture builders and round-trip tests for every normalized type.
 - [ ] Keep shutdown and other runtime controls outside `ChainEvent`.
 - [ ] Add replay APIs only after ordering and checkpoint semantics are stable.
@@ -111,14 +114,14 @@ Use the large-transfer monitor from the initial Raven concept as the first
 end-to-end plugin. It exercises logs, configuration, state, and output without
 requiring DEX-specific decoding.
 
-- [ ] Normalize or expose the receipt/log data required for ERC-20 `Transfer`.
-- [ ] Implement a statically registered transfer plugin with address and amount
-  thresholds.
-- [ ] Prove that the plugin performs no chain polling of its own.
-- [ ] Handle reverted blocks so an alert or stored observation can be corrected.
+- [x] Normalize or expose the receipt/log data required for ERC-20 `Transfer`.
+- [x] Implement a statically registered transfer plugin with token-address
+  filters and an amount threshold.
+- [x] Prove that the plugin performs no chain polling of its own.
+- [x] Handle reverted blocks so an alert or stored observation can be corrected.
 - [ ] Add one production-shaped sink, such as a webhook; keep Telegram as a
   follow-up adapter rather than coupling it to detection logic.
-- [ ] Provide deterministic unit tests and one opt-in live E2E example.
+- [x] Provide deterministic unit tests and one opt-in live E2E example.
 
 After that slice is sound, DEX swaps, portfolios, whale activity, databases,
 message queues, and Telegram notifications can reuse the same contracts.
@@ -169,7 +172,7 @@ not-implemented errors until this phase.
 | --- | --- |
 | At-least-once delivery and checkpoint commit point | Decided: CLI-owned, after every plugin succeeds |
 | Reorg depth and finality policy | Partly decided: configurable bounded window; finality policy remains open |
-| Core versus derived event granularity | Open; blocks are the only current payload |
+| Core versus derived event granularity | Decided for first slice: generic logs are block payloads; ERC-20 transfers are plugin-derived |
 | Reth version support policy | Open; the integrated Reth CLI will be version-pinned |
 | Plugin timeout and restart policy | Decided: bounded hooks, quarantine, no automatic in-process restart |
 | Static versus dynamic plugin packaging | Open; static registration remains the current safe default |

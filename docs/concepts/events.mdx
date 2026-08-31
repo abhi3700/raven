@@ -1,6 +1,6 @@
 ---
 title: "Events and validation"
-description: "Raven's normalized chain event model and the invariants enforced at its boundaries."
+description: "Raven's normalized block and EVM-log model and the invariants enforced at its boundaries."
 ---
 
 ## Chain ID
@@ -18,25 +18,57 @@ assert_eq!(chain.get(), 8_453);
 
 ## Block event
 
-`BlockEvent` stores source-independent block metadata:
+`BlockEvent` is the block-atomic payload delivered to plugins:
 
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `chain_id` | `ChainId` | EIP-155 chain ID |
 | `block_number` | `u64` | Block height |
-| `block_hash` | `String` | 32-byte, `0x`-prefixed hexadecimal hash |
-| `parent_hash` | `String` | Parent hash in the same format |
+| `block_hash` | `B256` | Typed 32-byte block hash |
+| `parent_hash` | `B256` | Typed 32-byte parent hash |
 | `timestamp` | `u64` | Unix timestamp in seconds |
 | `transaction_count` | `u64` | Transactions in the block |
+| `logs` | `Vec<EvmLog>` | Mined logs in deterministic block order |
 
-`BlockEvent::new` validates both hashes. For a non-genesis block, the block and
-parent hashes must differ. Fields are private and exposed through accessors such
-as `block_hash()` and `transaction_count()`, so construction cannot bypass
-validation.
+`BlockEvent::new` creates metadata-only test or adapter values.
+`BlockEvent::new_with_logs` also validates that every log refers to an existing
+transaction and that positions are strictly ordered by transaction index and
+log index. For a non-genesis block, the block and parent hashes must differ.
+
+Block hashes are `alloy_primitives::B256`, so callers cannot construct a short
+or non-hex hash and defer failure until runtime. Their human-readable Serde form
+remains a `0x`-prefixed 32-byte hexadecimal string.
+
+## EVM log
+
+`EvmLog` contains only mined log data a plugin can consume without an RPC call:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `address` | `Address` | Smart contract that emitted the log |
+| `topics` | `Vec<B256>` | Zero to four indexed EVM topics |
+| `data` | `Bytes` | ABI-encoded non-indexed event data |
+| `transaction_hash` | `B256` | Transaction that emitted the log |
+| `transaction_index` | `u64` | Transaction position in the block |
+| `log_index` | `u64` | Log position across the block |
+
+Block identity is not duplicated in every log. The enclosing `BlockEvent`
+supplies the number and hash, and Alloy conversion rejects an RPC log whose
+block metadata disagrees with that envelope.
+
+```mermaid
+flowchart TD
+    block[BlockEvent number + hash] --> logA[EvmLog 0]
+    block --> logB[EvmLog 1]
+    logA --> payloadA[address + topics + data]
+    logA --> identityA[transaction hash + indexes]
+    logB --> payloadB[address + topics + data]
+    logB --> identityB[transaction hash + indexes]
+```
 
 ## Chain event
 
-The current event enum has two variants:
+The event enum remains block-atomic:
 
 ```rust
 pub enum ChainEvent {
@@ -46,46 +78,60 @@ pub enum ChainEvent {
 ```
 
 `BlockApplied` means a block joined the canonical chain. `BlockReverted` means a
-previously applied block left the canonical chain.
+previously applied block left the canonical chain. Keeping logs inside this
+envelope means one event is still one checkpoint transition.
+
+```text
+apply block B with logs [L1, L2]
+              |
+              v shallow reorg
+revert block B with the same logs [L1, L2]
+              |
+              v
+plugin retracts or corrects observations derived from L1 and L2
+```
 
 Convenience methods expose common metadata without matching the enum:
 
 ```rust
 let block = event.block();
-let chain_id = event.chain_id();
-let number = event.block_number();
+let logs = block.logs();
 
 if event.is_applied() {
-    // Process a canonical block.
+    // Add observations derived from this canonical block.
+} else {
+    // Correct observations derived from the reverted block.
 }
 ```
 
-The RPC source emits `BlockReverted` for retained blocks displaced by a shallow
-fork, from old tip down to the common ancestor, before it emits replacement
-`BlockApplied` values. Forks deeper than the configured window are terminal.
+The RPC source emits retained old blocks from tip toward the common ancestor,
+then replacement blocks in ascending order. Forks deeper than the configured
+window are terminal.
 
-## Event boundary
+## Source and plugin boundary
 
 ```mermaid
 flowchart LR
-    native[Source-native block] -->|adapter conversion| block[Validated BlockEvent]
-    block --> applied[ChainEvent BlockApplied]
-    block -->|shallow reorg correction| reverted[ChainEvent BlockReverted]
-    applied --> runtime[Raven Runtime]
+    rpc[RPC block] --> block[Typed BlockEvent]
+    rpcLogs[Validated eth_getLogs result] --> validate[Validate mined metadata]
+    validate --> block
+    block --> applied[BlockApplied]
+    block -->|shallow reorg| reverted[BlockReverted]
+    applied --> runtime[Runtime]
     reverted --> runtime
+    runtime --> plugin[Plugins derive transfers, swaps, and alerts]
 ```
 
-Transactions, logs, transfers, swaps, and other domain events are possible
-extensions, but they are not current `ChainEvent` variants. Runtime shutdown is
-a plugin lifecycle action and should remain outside the serializable chain-event
-model.
+Logs are generic core payloads. ERC-20 transfers, DEX swaps, and other
+protocol-specific meanings remain derived plugin behavior rather than new core
+variants. Runtime shutdown remains a lifecycle action outside the serializable
+chain-event model.
 
 ## Serialization
 
-Core event types support Serde serialization and validated deserialization.
-Deserializing a zero chain ID, malformed hash, or identical non-genesis block
-and parent hash returns an error. `ChainEvent` uses an internally tagged shape
-with snake-case variant names:
+Core event types support Serde serialization and validation-preserving
+deserialization. Existing metadata-only JSON without `logs` remains compatible
+and deserializes to an empty log list. New events serialize logs in the block:
 
 ```json
 {
@@ -96,7 +142,26 @@ with snake-case variant names:
     "block_hash": "0x1111111111111111111111111111111111111111111111111111111111111111",
     "parent_hash": "0x2222222222222222222222222222222222222222222222222222222222222222",
     "timestamp": 1720000000,
-    "transaction_count": 150
+    "transaction_count": 1,
+    "logs": [
+      {
+        "address": "0x3333333333333333333333333333333333333333",
+        "topics": [
+          "0x4444444444444444444444444444444444444444444444444444444444444444"
+        ],
+        "data": "0x",
+        "transaction_hash": "0x5555555555555555555555555555555555555555555555555555555555555555",
+        "transaction_index": 0,
+        "log_index": 0
+      }
+    ]
   }
 }
 ```
+
+Standalone `ChainEvent` JSON is an interchange shape, not yet a durable replay
+format. The current CLI checkpoint wraps its nested block payloads in
+`schema_version`; an incompatible layout or semantic change requires a
+checkpoint version bump and an explicit compatibility or migration path.
+Future event stores and replay APIs must likewise add a versioned envelope
+rather than treating the bare Serde representation as permanently stable.

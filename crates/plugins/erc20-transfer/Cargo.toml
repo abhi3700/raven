@@ -1,5 +1,5 @@
 [package]
-name = "raven-plugin-sdk"
+name = "raven-plugin-erc20-transfer"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -7,12 +7,13 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+alloy-primitives.workspace = true
+alloy-sol-types.workspace = true
 async-trait.workspace = true
-raven-core = { path = "../raven-core" }
+raven-core = { path = "../../raven-core" }
+raven-plugin-sdk = { path = "../../raven-plugin-sdk" }
 thiserror.workspace = true
-tokio.workspace = true
-eyre.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
-alloy-primitives.workspace = true
 tokio.workspace = true

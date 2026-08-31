@@ -11,11 +11,13 @@ name = "raven"
 path = "src/main.rs"
 
 [dependencies]
+alloy-primitives.workspace = true
 async-trait.workspace = true
 eyre.workspace = true
 clap.workspace = true
 colored.workspace = true
 raven-core = { path = "../raven-core" }
+raven-plugin-erc20-transfer = { path = "../plugins/erc20-transfer" }
 raven-plugin-sdk = { path = "../raven-plugin-sdk" }
 raven-runtime = { path = "../raven-runtime" }
 raven-source-alloy = { path = "../raven-source-alloy" }

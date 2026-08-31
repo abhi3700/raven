@@ -14,14 +14,16 @@
 //!        v
 //! source.rs
 //!   - select HTTP polling or WebSocket subscriptions
+//!   - fetch each full block and its logs in a validated JSON-RPC batch by default
+//!   - preserve hash-pinned sequential retrieval as an explicit compatibility mode
 //!   - preserve a canonical cursor across reconnects
 //!   - reconcile remembered ancestry with the RPC canonical chain
 //!   - emit applied and reverted blocks in dependency order
 //!        |
 //!        v
 //! converter.rs
-//!   - strip away Alloy-specific block representation
-//!   - build Raven's validated BlockEvent/ChainEvent model
+//!   - validate mined log identity and deterministic ordering
+//!   - build Raven's validated BlockEvent/EvmLog/ChainEvent model
 //!        |
 //!        v
 //! Raven runtime and plugins
@@ -39,5 +41,6 @@ mod source;
 
 pub use error::{AlloySourceError, AlloySourceResult};
 pub use source::{
-	AlloySource, RetryPolicy, RpcEndpointInfo, RpcTransport, SourceStart, inspect_rpc_endpoint,
+	AlloySource, BlockFetchMode, RetryPolicy, RpcEndpointInfo, RpcTransport, SourceStart,
+	inspect_rpc_endpoint,
 };

@@ -4,9 +4,10 @@ description: "How Raven's Alloy-backed RPC adapter combines polling or WebSocket
 ---
 
 `AlloySource` is the internal adapter behind `raven run`. It connects to
-EVM-compatible HTTP(S) and WS(S) JSON-RPC endpoints, fetches full blocks,
-converts them into normalized `ChainEvent` values, and publishes them through a
-bounded Tokio channel.
+EVM-compatible HTTP(S) and WS(S) JSON-RPC endpoints, fetches each block and its
+logs in one validated batch by default, converts them into normalized
+`ChainEvent` values, and publishes them through a bounded Tokio channel. The
+original sequential, hash-pinned strategy remains available explicitly.
 
 The CLI does not expose `--source alloy`: Alloy is the implementation of the
 current RPC path, not an operator-selected deployment mode. The endpoint may be
@@ -26,8 +27,13 @@ flowchart LR
     polling --> catchup[Ordered catch-up]
     immediate --> catchup
     safety --> catchup
-    catchup --> fetch[Fetch full blocks by number]
-    fetch --> events[Normalized ChainEvent values]
+    catchup --> mode{Block fetch mode}
+    mode -->|batch, default| batch[One packet: block by number + logs by number]
+    mode -->|sequential| block[Fetch block by number]
+    block --> logs[Fetch logs by block hash]
+    batch --> validate[Validate block and logs together]
+    logs --> validate
+    validate --> events[Normalized ChainEvent values]
 ```
 
 HTTP is request/response transport, so periodic polling is the portable
@@ -63,8 +69,10 @@ flowchart LR
 `ChainId` accepts every non-zero `u64`; Raven does not compare the discovered
 value against a supported-chain list. Alloy's default Ethereum network type is
 the baseline RPC block schema used by EVM chains—it does not force chain ID 1.
-An endpoint must provide the standard `eth_chainId`, `eth_blockNumber`, and
-`eth_getBlockByNumber` methods, plus `eth_subscribe` when using WS(S).
+An endpoint must provide the standard `eth_chainId`, `eth_blockNumber`,
+`eth_getBlockByNumber`, and `eth_getLogs` methods, plus `eth_subscribe` when
+using WS(S). Batch mode additionally requires JSON-RPC batch-packet support;
+select sequential mode for an endpoint that rejects batches.
 
 ## One canonical catch-up path
 
@@ -88,6 +96,23 @@ verify parent links, emit Applied, retain bounded ancestry
 A WebSocket header is only a signal that a height is available. Raven does not
 publish the partial header as its block event. It requests every full block
 from the cursor through the signalled height using `eth_getBlockByNumber`.
+
+In the default `batch` mode, Raven places that request and an `eth_getLogs`
+request whose `fromBlock` and `toBlock` are the same height into one JSON-RPC
+packet. A batch is not an atomic node snapshot, so Raven verifies the returned
+block number, every log's block number and hash, and the aggregate logs bloom.
+A mismatch means the canonical chain changed while the packet was handled;
+Raven retries reconciliation instead of emitting a mixed event.
+
+In `sequential` mode, Raven first receives the block and then requests logs
+pinned to its hash. This preserves the original two-round-trip behavior as an
+endpoint-compatibility and rollback option. Both modes use the same conversion,
+ordering, reorg, and checkpoint logic after retrieval.
+
+RPC logs must report the expected block number and hash, transaction hash,
+transaction index, and log index. Raven rejects removed, mismatched, incomplete,
+duplicate, or out-of-range logs before the event reaches the runtime. Valid logs
+are sorted by transaction index and log index.
 
 For example, if Raven's next height is 100 and it observes head 103, it emits
 100, 101, 102, and 103 in ascending order. A duplicate or stale notification
@@ -159,20 +184,30 @@ let source = AlloySource::new("wss://your-evm-rpc.example")
 ```
 
 The default HTTP poll interval is 4 seconds. The default WS reconciliation
-interval is 30 seconds. The default reorg window is 64 blocks. Source
-configuration rejects zero intervals/depth, malformed resume windows, and an
-invalid retry policy before processing events.
+interval is 30 seconds. The default reorg window is 64 blocks, and the default
+block fetch mode is `BlockFetchMode::Batch`. Select the compatibility path
+explicitly when required:
+
+```rust
+use raven_source_alloy::{AlloySource, BlockFetchMode};
+
+let source = AlloySource::new("https://your-evm-rpc.example")
+    .with_block_fetch_mode(BlockFetchMode::Sequential);
+```
+
+Source configuration rejects zero intervals/depth, malformed resume windows,
+and an invalid retry policy before processing events.
 
 ## Failure behavior
 
 `AlloySourceError::is_transient` separates retryable transport/state failures
 from terminal contract violations.
 
-Transient failures include connection/request/subscription errors, a closed
-subscription, a temporarily omitted block, and the chain changing during a
-multi-block reconciliation. Raven reconnects with exponential backoff starting
-at 500 ms, capped at 30 seconds, with 20% jitter. Every retry logs its attempt,
-delay, and cause.
+Transient failures include connection, block, log, batch, and subscription
+request errors, a closed subscription, a temporarily omitted block, and the
+chain changing during a multi-block reconciliation. Raven reconnects with
+exponential backoff starting at 500 ms, capped at 30 seconds, with 20% jitter.
+Every retry logs its attempt, delay, and cause.
 
 Terminal failures include an invalid URL/configuration, invalid chain ID,
 resume checkpoint mismatch, block conversion failure, receiver loss, and a
@@ -185,5 +220,11 @@ than retrying a condition that cannot be repaired by reconnecting.
   and a deliberate new start position.
 - The source does not persist state by itself. Embedders other than the Raven
   CLI must own their acknowledgement/checkpoint contract.
+- Batch mode still executes two JSON-RPC methods per block, but carries them in
+  one transport packet. Sequential mode uses two dependent transport requests.
+- Fetching all logs makes checkpoint size proportional to the retained log
+  payload.
+- Some endpoints disable JSON-RPC batch packets; use
+  `--block-fetch-mode sequential` with those providers.
 - JSON-RPC providers may differ in retention and EVM compatibility, so explicit
   historical starts can fail when the endpoint has pruned the requested data.

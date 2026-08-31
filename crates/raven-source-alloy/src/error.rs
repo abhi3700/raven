@@ -36,6 +36,12 @@ pub enum AlloySourceError {
 	#[error("failed to retrieve block data: {0}")]
 	BlockRequest(String),
 
+	#[error("failed to retrieve block logs: {0}")]
+	LogRequest(String),
+
+	#[error("failed to execute batched block and log request: {0}")]
+	BatchRequest(String),
+
 	#[error("failed to subscribe to new block headers: {0}")]
 	Subscription(String),
 
@@ -58,6 +64,9 @@ pub enum AlloySourceError {
 	#[error("failed to normalize block: {0}")]
 	BlockConversion(String),
 
+	#[error("failed to normalize block log: {0}")]
+	LogConversion(String),
+
 	#[error("event receiver was dropped")]
 	EventReceiverDropped,
 }
@@ -70,6 +79,8 @@ impl AlloySourceError {
 			Self::Connection(_) |
 				Self::ChainIdRequest(_) |
 				Self::BlockRequest(_) |
+				Self::LogRequest(_) |
+				Self::BatchRequest(_) |
 				Self::Subscription(_) |
 				Self::SubscriptionEnded |
 				Self::CanonicalChanged { .. }

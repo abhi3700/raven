@@ -48,9 +48,14 @@
 
 use crate::{AlloySourceError, AlloySourceResult, converter::convert_block};
 use alloy::{
+	consensus::BlockHeader,
 	eips::BlockNumberOrTag,
+	network::BlockResponse,
 	providers::{Provider, ProviderBuilder, WsConnect},
-	rpc::client::BuiltInConnectionString,
+	rpc::{
+		client::{BatchRequest, BuiltInConnectionString},
+		types::{Block, Filter, Log},
+	},
 };
 use futures_util::StreamExt;
 use raven_core::{BlockEvent, ChainEvent, ChainId};
@@ -230,6 +235,40 @@ impl std::fmt::Display for RpcTransport {
 	}
 }
 
+/// RPC strategy used to fetch one canonical block and all of its logs.
+///
+/// `Batch` sends the block and block-range log calls in one JSON-RPC packet,
+/// then verifies their hashes and aggregate logs bloom before conversion.
+/// `Sequential` preserves the original two-step approach: fetch the block,
+/// then use its hash to pin the log request.
+///
+/// ```text
+/// Batch (default)                   Sequential
+/// ------------------------------    ------------------------------
+/// [getBlockByNumber(N),             getBlockByNumber(N)
+///  getLogs(N..=N)]                         |
+///          |                               v
+///          v                        getLogs(blockHash)
+/// validate hash + logs bloom
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BlockFetchMode {
+	/// One JSON-RPC batch packet with consistency validation.
+	#[default]
+	Batch,
+	/// Two dependent JSON-RPC requests with a hash-pinned log filter.
+	Sequential,
+}
+
+impl std::fmt::Display for BlockFetchMode {
+	fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			Self::Batch => formatter.write_str("batch"),
+			Self::Sequential => formatter.write_str("sequential"),
+		}
+	}
+}
+
 /// Read-only RPC connectivity information used by `raven doctor`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RpcEndpointInfo {
@@ -302,6 +341,7 @@ async fn inspect_provider(
 ///   reorg_depth
 ///   intervals
 ///   retry_policy
+///   block_fetch_mode
 ///        |
 ///        v
 /// run(sender)
@@ -316,6 +356,7 @@ pub struct AlloySource {
 	reorg_depth: usize,
 	start: SourceStart,
 	retry_policy: RetryPolicy,
+	block_fetch_mode: BlockFetchMode,
 }
 
 impl AlloySource {
@@ -324,7 +365,8 @@ impl AlloySource {
 	/// By default Raven starts at the latest observed head, retains 64 recent
 	/// canonical blocks for shallow-reorg detection, polls HTTP endpoints every
 	/// 4 seconds, reconciles WebSocket endpoints every 30 seconds, and retries
-	/// transient source failures with capped exponential backoff.
+	/// transient source failures with capped exponential backoff. Block and log
+	/// data are fetched in one validated JSON-RPC batch by default.
 	pub fn new(rpc_url: impl Into<String>) -> Self {
 		Self {
 			rpc_url: rpc_url.into(),
@@ -333,6 +375,7 @@ impl AlloySource {
 			reorg_depth: DEFAULT_REORG_DEPTH,
 			start: SourceStart::Latest,
 			retry_policy: RetryPolicy::default(),
+			block_fetch_mode: BlockFetchMode::default(),
 		}
 	}
 
@@ -368,6 +411,17 @@ impl AlloySource {
 	#[must_use]
 	pub const fn with_retry_policy(mut self, retry_policy: RetryPolicy) -> Self {
 		self.retry_policy = retry_policy;
+		self
+	}
+
+	/// Selects batched or sequential block/log retrieval.
+	///
+	/// Batch mode is the default. Sequential mode is useful for RPC endpoints
+	/// that reject JSON-RPC batch packets or when hash-pinned retrieval is
+	/// preferred operationally.
+	#[must_use]
+	pub const fn with_block_fetch_mode(mut self, block_fetch_mode: BlockFetchMode) -> Self {
+		self.block_fetch_mode = block_fetch_mode;
 		self
 	}
 
@@ -463,19 +517,21 @@ impl AlloySource {
 		cursor.validate_chain(chain_id)?;
 		let latest = latest_block_number(&provider).await?;
 		cursor.initialize(latest);
-		reconcile_through(&provider, chain_id, sender, cursor, latest).await?;
+		let canonical_provider = RpcCanonicalBlockProvider::new(&provider, self.block_fetch_mode);
+		reconcile_through(&canonical_provider, chain_id, sender, cursor, latest).await?;
 
 		let mut interval = tokio::time::interval(self.poll_interval);
 		interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 		info!(
 			chain_id = chain_id.get(),
 			poll_interval_ms = self.poll_interval.as_millis(),
+			block_fetch_mode = %self.block_fetch_mode,
 			"connected HTTP polling event source"
 		);
 		loop {
 			interval.tick().await;
 			let latest = latest_block_number(&provider).await?;
-			reconcile_through(&provider, chain_id, sender, cursor, latest).await?;
+			reconcile_through(&canonical_provider, chain_id, sender, cursor, latest).await?;
 		}
 	}
 
@@ -526,11 +582,13 @@ impl AlloySource {
 		let mut heads = subscription.into_stream();
 		let latest = latest_block_number(&provider).await?;
 		cursor.initialize(latest);
-		reconcile_through(&provider, chain_id, sender, cursor, latest).await?;
+		let canonical_provider = RpcCanonicalBlockProvider::new(&provider, self.block_fetch_mode);
+		reconcile_through(&canonical_provider, chain_id, sender, cursor, latest).await?;
 
 		info!(
 			chain_id = chain_id.get(),
 			reconciliation_interval_ms = self.reconciliation_interval.as_millis(),
+			block_fetch_mode = %self.block_fetch_mode,
 			"connected WebSocket subscription event source"
 		);
 		let start = tokio::time::Instant::now() + self.reconciliation_interval;
@@ -541,11 +599,11 @@ impl AlloySource {
 			tokio::select! {
 				maybe_header = heads.next() => {
 					let header = maybe_header.ok_or(AlloySourceError::SubscriptionEnded)?;
-					reconcile_through(&provider, chain_id, sender, cursor, header.number).await?;
+					reconcile_through(&canonical_provider, chain_id, sender, cursor, header.number).await?;
 				}
 				_ = reconciliation.tick() => {
 					let latest = latest_block_number(&provider).await?;
-					reconcile_through(&provider, chain_id, sender, cursor, latest).await?;
+					reconcile_through(&canonical_provider, chain_id, sender, cursor, latest).await?;
 				}
 			}
 		}
@@ -779,7 +837,7 @@ async fn reconcile_through(
 			return Err(AlloySourceError::CanonicalChanged { block_number: next });
 		}
 
-		debug!(chain_id = chain_id.get(), block_number = block.block_number(), block_hash = %block.block_hash(), transactions = block.transaction_count(), "received canonical block event");
+		debug!(chain_id = chain_id.get(), block_number = block.block_number(), block_hash = %block.block_hash(), transactions = block.transaction_count(), logs = block.logs().len(), "received canonical block event");
 		sender
 			.send(ChainEvent::BlockApplied(block.clone()))
 			.await
@@ -811,7 +869,7 @@ async fn fetch_block(
 ///        v
 /// canonical_block(chain_id, number)
 ///        |
-///        +-- production: Alloy Provider -> eth_getBlockByNumber -> convert_block
+///        +-- production: Alloy Provider -> batch or sequential strategy -> convert_block
 ///        |
 ///        +-- tests: in-memory block map
 /// ```
@@ -823,7 +881,18 @@ trait CanonicalBlockProvider {
 	) -> AlloySourceResult<BlockEvent>;
 }
 
-impl<P> CanonicalBlockProvider for P
+struct RpcCanonicalBlockProvider<'a, P> {
+	provider: &'a P,
+	block_fetch_mode: BlockFetchMode,
+}
+
+impl<'a, P> RpcCanonicalBlockProvider<'a, P> {
+	const fn new(provider: &'a P, block_fetch_mode: BlockFetchMode) -> Self {
+		Self { provider, block_fetch_mode }
+	}
+}
+
+impl<P> CanonicalBlockProvider for RpcCanonicalBlockProvider<'_, P>
 where
 	P: Provider,
 {
@@ -832,17 +901,93 @@ where
 		chain_id: ChainId,
 		block_number: u64,
 	) -> AlloySourceResult<BlockEvent> {
-		let block = self
-			.get_block_by_number(BlockNumberOrTag::Number(block_number))
-			.await
-			.map_err(|error| AlloySourceError::BlockRequest(error.to_string()))?
-			.ok_or_else(|| {
-				AlloySourceError::BlockRequest(format!(
-					"block {block_number} was not returned by RPC"
-				))
-			})?;
-		Ok(convert_block(chain_id, &block)?.block().clone())
+		match self.block_fetch_mode {
+			BlockFetchMode::Batch =>
+				fetch_canonical_block_batch(self.provider, chain_id, block_number).await,
+			BlockFetchMode::Sequential =>
+				fetch_canonical_block_sequential(self.provider, chain_id, block_number).await,
+		}
 	}
+}
+
+async fn fetch_canonical_block_sequential(
+	provider: &impl Provider,
+	chain_id: ChainId,
+	block_number: u64,
+) -> AlloySourceResult<BlockEvent> {
+	let block = provider
+		.get_block_by_number(BlockNumberOrTag::Number(block_number))
+		.await
+		.map_err(|error| AlloySourceError::BlockRequest(error.to_string()))?
+		.ok_or_else(|| missing_block_error(block_number))?;
+	let filter = Filter::new().at_block_hash(block.header.hash);
+	let logs = provider
+		.get_logs(&filter)
+		.await
+		.map_err(|error| AlloySourceError::LogRequest(error.to_string()))?;
+	Ok(convert_block(chain_id, &block, logs)?.block().clone())
+}
+
+async fn fetch_canonical_block_batch(
+	provider: &impl Provider,
+	chain_id: ChainId,
+	block_number: u64,
+) -> AlloySourceResult<BlockEvent> {
+	let block_tag = BlockNumberOrTag::Number(block_number);
+	let block_params = (block_tag, false);
+	let filter = Filter::new().select(block_number);
+	let log_params = (&filter,);
+	let mut batch = BatchRequest::new(provider.client());
+	let block_waiter = batch
+		.add_call::<_, Option<Block>>("eth_getBlockByNumber", &block_params)
+		.map_err(|error| AlloySourceError::BlockRequest(error.to_string()))?;
+	let logs_waiter = batch
+		.add_call::<_, Vec<Log>>("eth_getLogs", &log_params)
+		.map_err(|error| AlloySourceError::LogRequest(error.to_string()))?;
+
+	batch.await.map_err(|error| AlloySourceError::BatchRequest(error.to_string()))?;
+	let block = block_waiter
+		.await
+		.map_err(|error| AlloySourceError::BlockRequest(error.to_string()))?
+		.ok_or_else(|| missing_block_error(block_number))?;
+	let logs = logs_waiter
+		.await
+		.map_err(|error| AlloySourceError::LogRequest(error.to_string()))?;
+
+	validate_batch_consistency(&block, &logs, block_number)?;
+	Ok(convert_block(chain_id, &block, logs)?.block().clone())
+}
+
+fn missing_block_error(block_number: u64) -> AlloySourceError {
+	AlloySourceError::BlockRequest(format!("block {block_number} was not returned by RPC"))
+}
+
+fn validate_batch_consistency(
+	block: &Block,
+	logs: &[Log],
+	requested_block: u64,
+) -> AlloySourceResult {
+	let header = block.header();
+	if header.number() != requested_block {
+		return Err(AlloySourceError::BlockConversion(format!(
+			"RPC returned block {} for requested block {requested_block}",
+			header.number()
+		)));
+	}
+
+	if logs
+		.iter()
+		.any(|log| log.block_number != Some(requested_block) || log.block_hash != Some(header.hash))
+	{
+		return Err(AlloySourceError::CanonicalChanged { block_number: requested_block });
+	}
+
+	let returned_logs_bloom = alloy::primitives::logs_bloom(logs.iter().map(|log| &log.inner));
+	if returned_logs_bloom != header.logs_bloom() {
+		return Err(AlloySourceError::CanonicalChanged { block_number: requested_block });
+	}
+
+	Ok(())
 }
 
 async fn validated_chain_id(provider: &impl Provider) -> AlloySourceResult<ChainId> {
@@ -863,7 +1008,123 @@ async fn latest_block_number(provider: &impl Provider) -> AlloySourceResult<u64>
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use alloy::{
+		consensus::Header as ConsensusHeader,
+		primitives::{Address, B256, Bytes, Log as PrimitiveLog, LogData},
+		providers::mock::Asserter,
+		rpc::types::{BlockTransactions, Header, Log as RpcLog},
+	};
+	use raven_core::EvmLog;
 	use std::{collections::BTreeMap, sync::Mutex};
+
+	const RPC_BLOCK_NUMBER: u64 = 21_000_000;
+	const RPC_BLOCK_HASH: B256 = B256::repeat_byte(0x11);
+
+	fn rpc_log() -> RpcLog {
+		RpcLog {
+			inner: PrimitiveLog {
+				address: Address::repeat_byte(0x33),
+				data: LogData::new(vec![B256::repeat_byte(0x44)], Bytes::from_static(&[0x55]))
+					.unwrap(),
+			},
+			block_hash: Some(RPC_BLOCK_HASH),
+			block_number: Some(RPC_BLOCK_NUMBER),
+			transaction_hash: Some(B256::repeat_byte(0x66)),
+			transaction_index: Some(0),
+			log_index: Some(0),
+			..Default::default()
+		}
+	}
+
+	fn rpc_block(logs: &[RpcLog]) -> Block {
+		let consensus_header = ConsensusHeader {
+			number: RPC_BLOCK_NUMBER,
+			parent_hash: B256::repeat_byte(0x22),
+			timestamp: 1_720_000_000,
+			logs_bloom: alloy::primitives::logs_bloom(logs.iter().map(|log| &log.inner)),
+			..Default::default()
+		};
+		let rpc_header =
+			Header { hash: RPC_BLOCK_HASH, inner: consensus_header, ..Default::default() };
+		let mut block = Block { header: rpc_header, ..Default::default() };
+		block.transactions = BlockTransactions::Hashes(vec![B256::repeat_byte(0x66)]);
+		block
+	}
+
+	#[test]
+	fn batch_is_the_default_block_fetch_mode() {
+		let source = AlloySource::new("http://localhost:8545");
+
+		assert_eq!(BlockFetchMode::default(), BlockFetchMode::Batch);
+		assert_eq!(source.block_fetch_mode, BlockFetchMode::Batch);
+	}
+
+	#[tokio::test]
+	async fn batch_fetches_and_converts_block_with_logs() {
+		let logs = vec![rpc_log()];
+		let block = rpc_block(&logs);
+		let asserter = Asserter::new();
+		asserter.push_success(&block);
+		asserter.push_success(&logs);
+		let provider = ProviderBuilder::new().connect_mocked_client(asserter.clone());
+		let chain_id = ChainId::new(8_453).unwrap();
+
+		let fetched = fetch_canonical_block_batch(&provider, chain_id, RPC_BLOCK_NUMBER)
+			.await
+			.unwrap();
+
+		assert_eq!(fetched.block_number(), RPC_BLOCK_NUMBER);
+		assert_eq!(fetched.block_hash(), RPC_BLOCK_HASH);
+		assert_eq!(fetched.logs().len(), 1);
+		assert!(asserter.read_q().is_empty());
+	}
+
+	#[tokio::test]
+	async fn sequential_fetch_remains_available() {
+		let logs = vec![rpc_log()];
+		let block = rpc_block(&logs);
+		let asserter = Asserter::new();
+		asserter.push_success(&block);
+		asserter.push_success(&logs);
+		let provider = ProviderBuilder::new().connect_mocked_client(asserter.clone());
+		let chain_id = ChainId::new(8_453).unwrap();
+
+		let fetched = fetch_canonical_block_sequential(&provider, chain_id, RPC_BLOCK_NUMBER)
+			.await
+			.unwrap();
+
+		assert_eq!(fetched.block_hash(), RPC_BLOCK_HASH);
+		assert_eq!(fetched.logs().len(), 1);
+		assert!(asserter.read_q().is_empty());
+	}
+
+	#[test]
+	fn batch_retries_when_logs_belong_to_another_canonical_block() {
+		let expected_log = rpc_log();
+		let block = rpc_block(std::slice::from_ref(&expected_log));
+		let mut replacement_log = expected_log;
+		replacement_log.block_hash = Some(B256::repeat_byte(0x99));
+
+		let error =
+			validate_batch_consistency(&block, &[replacement_log], RPC_BLOCK_NUMBER).unwrap_err();
+
+		assert!(matches!(
+			error,
+			AlloySourceError::CanonicalChanged { block_number: RPC_BLOCK_NUMBER }
+		));
+	}
+
+	#[test]
+	fn batch_retries_when_empty_logs_conflict_with_header_bloom() {
+		let block = rpc_block(&[rpc_log()]);
+
+		let error = validate_batch_consistency(&block, &[], RPC_BLOCK_NUMBER).unwrap_err();
+
+		assert!(matches!(
+			error,
+			AlloySourceError::CanonicalChanged { block_number: RPC_BLOCK_NUMBER }
+		));
+	}
 
 	#[tokio::test]
 	async fn rejects_zero_intervals_before_connecting() {
@@ -916,6 +1177,8 @@ mod tests {
 		for error in [
 			AlloySourceError::Connection("offline".to_owned()),
 			AlloySourceError::BlockRequest("fixture omitted block".to_owned()),
+			AlloySourceError::LogRequest("fixture omitted logs".to_owned()),
+			AlloySourceError::BatchRequest("fixture rejected batch".to_owned()),
 			AlloySourceError::SubscriptionEnded,
 			AlloySourceError::CanonicalChanged { block_number: 12 },
 		] {
@@ -927,11 +1190,8 @@ mod tests {
 	#[test]
 	fn validates_contiguous_resume_window() {
 		let chain = ChainId::new(8453).unwrap();
-		let first =
-			BlockEvent::new(chain, 10, format!("0x{:064x}", 10), format!("0x{:064x}", 9), 1, 0)
-				.unwrap();
-		let second =
-			BlockEvent::new(chain, 11, format!("0x{:064x}", 11), first.block_hash(), 2, 0).unwrap();
+		let first = BlockEvent::new(chain, 10, hash_value(10), hash_value(9), 1, 0).unwrap();
+		let second = BlockEvent::new(chain, 11, hash_value(11), first.block_hash(), 2, 0).unwrap();
 		assert!(validate_resume_window(&[first, second]).is_ok());
 	}
 
@@ -940,7 +1200,7 @@ mod tests {
 		let chain = ChainId::new(8453).unwrap();
 		let a = block(chain, 10, 10, 9);
 		let b = block(chain, 11, 11, 10);
-		let c = block(chain, 12, 12, 11);
+		let c = block_with_log(chain, 12, 12, 11);
 		let x = block(chain, 11, 1011, 10);
 		let y = block(chain, 12, 1012, 1011);
 		let provider = MockCanonicalProvider::new([a.clone(), x.clone(), y.clone()]);
@@ -1023,8 +1283,33 @@ mod tests {
 	}
 
 	fn block(chain: ChainId, number: u64, hash: u64, parent: u64) -> BlockEvent {
-		BlockEvent::new(chain, number, format!("0x{hash:064x}"), format!("0x{parent:064x}"), 1, 0)
-			.unwrap()
+		BlockEvent::new(chain, number, hash_value(hash), hash_value(parent), 1, 0).unwrap()
+	}
+
+	fn block_with_log(chain: ChainId, number: u64, hash: u64, parent: u64) -> BlockEvent {
+		let log = EvmLog::new(
+			Address::repeat_byte(0x11),
+			vec![B256::repeat_byte(0x22)],
+			Bytes::from_static(&[0x33]),
+			B256::repeat_byte(0x44),
+			0,
+			0,
+		)
+		.unwrap();
+		BlockEvent::new_with_logs(
+			chain,
+			number,
+			hash_value(hash),
+			hash_value(parent),
+			1,
+			1,
+			vec![log],
+		)
+		.unwrap()
+	}
+
+	fn hash_value(value: u64) -> alloy::primitives::B256 {
+		format!("0x{value:064x}").parse().unwrap()
 	}
 
 	struct MockCanonicalProvider {

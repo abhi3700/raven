@@ -42,12 +42,14 @@ plugins own application logic.
 - Automatic EIP-155 chain discovery with no chain allowlist
 - Runtime state and per-chain validation
 - Transport-aware JSON-RPC ingestion backed by Alloy: HTTP polling or WS subscriptions with reconciliation
+- Validated batched block/log ingestion by default, with hash-pinned sequential compatibility
 - Capped transient-RPC retry with jitter and structured telemetry
 - Durable per-chain resume, explicit block starts, and bounded shallow-reorg correction
 - At-least-once CLI delivery: checkpoints commit only after every plugin succeeds
 - Bounded plugin lifecycle hooks, worker health, and aggregate cleanup errors
 - Persistent RPC URL configuration with CLI and environment overrides
 - Working CLI orchestration with graceful Ctrl+C shutdown
+- Opt-in built-in monitoring for large ERC-20 transfers, including reorg corrections
 - Normalized event boundary designed for future Reth ExEx support
 
 > **Important:** Raven is early-stage. Dynamic plugin installation and the
@@ -107,9 +109,11 @@ Run `raven config clear` to remove the persisted value.
 
 Raven calls `eth_chainId`, accepts any non-zero EIP-155 chain ID, selects that
 chain's durable checkpoint, and initializes the runtime. There is no
-Ethereum-mainnet allowlist. It
-then fetches full blocks, sends normalized events through the runtime, and logs
-each block with the built-in `block-logger` plugin. HTTP(S) polls for new
+Ethereum-mainnet allowlist. It then fetches blocks and their logs in one
+validated JSON-RPC batch by default, sends normalized events through the
+runtime, and logs each block with the built-in `block-logger` plugin. Use
+`--block-fetch-mode sequential` for the original hash-pinned two-request
+strategy. HTTP(S) polls for new
 heights; WS(S) subscribes to `newHeads` and periodically reconciles missed
 heights. Press Ctrl+C to shut down cleanly.
 
@@ -119,6 +123,23 @@ is no checkpoint. Use `--start latest` to ignore saved progress or
 `--start <BLOCK>` to backfill from an inclusive height. Raven retains 64 recent
 canonical blocks by default and delivers shallow-fork reverts before
 replacement blocks.
+
+Enable the statically linked ERC-20 transfer monitor with an inclusive threshold
+in raw token units:
+
+```bash
+raven run \
+  --rpc-url http://localhost:8545 \
+  --erc20-transfer-min-amount 1000000000000000000000 \
+  --erc20-token 0x1111111111111111111111111111111111111111 0x2222222222222222222222222222222222222222
+```
+
+List several contracts after one `--erc20-token` flag, or omit it to accept
+valid ERC-20 `Transfer` logs from every contract. One minimum amount applies to
+every listed token; provide the same number of amounts and addresses for
+positionally paired thresholds. Raven does not guess token decimals. Applied
+matches are logged as detections; a shallow reorg logs the corresponding
+transfers as reverted from the same retained block payload.
 
 One Raven process handles one discovered chain so event ordering and plugin
 state cannot accidentally cross chains. Run separate Raven processes to ingest

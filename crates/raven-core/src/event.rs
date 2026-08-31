@@ -46,6 +46,8 @@ impl ChainEvent {
 
 #[cfg(test)]
 mod tests {
+	use alloy_primitives::B256;
+
 	use super::*;
 
 	fn test_chain_id() -> ChainId {
@@ -56,8 +58,8 @@ mod tests {
 		BlockEvent::new(
 			test_chain_id(),
 			21_000_000,
-			"0x1111111111111111111111111111111111111111111111111111111111111111",
-			"0x2222222222222222222222222222222222222222222222222222222222222222",
+			B256::repeat_byte(0x11),
+			B256::repeat_byte(0x22),
 			1_720_000_000,
 			150,
 		)

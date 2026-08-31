@@ -335,6 +335,7 @@ impl Runtime {
 mod tests {
 	use super::*;
 	use crate::{DispatchId, PluginDeliveryFailure, PluginDeliveryStatus, PluginOutcomeStatus};
+	use alloy_primitives::B256;
 	use async_trait::async_trait;
 	use raven_core::{BlockEvent, ChainEvent, ChainId};
 	use raven_plugin_sdk::{Plugin, PluginContext, PluginError, PluginMetadata, PluginResult};
@@ -641,8 +642,8 @@ mod tests {
 		let block = BlockEvent::new(
 			chain_id,
 			block_number,
-			format!("0x{block_number:064x}"),
-			format!("0x{:064x}", block_number.saturating_sub(1)),
+			format!("0x{block_number:064x}").parse::<B256>().unwrap(),
+			format!("0x{:064x}", block_number.saturating_sub(1)).parse::<B256>().unwrap(),
 			1_720_000_000,
 			150,
 		)
