@@ -20,11 +20,11 @@ Arrows mean "depends on":
 
 ```mermaid
 flowchart TD
-    ravenCli["raven CLI"] --> alloySource["Alloy-backed RPC adapter"]
+    ravenCli["raven CLI"] --> rpcSource["RPC source (Alloy-backed)"]
     ravenCli --> runtimeCrate["raven-runtime"]
     ravenCli --> pluginSdk["raven-plugin-sdk"]
     ravenCli --> coreCrate["raven-core"]
-    alloySource --> coreCrate
+    rpcSource --> coreCrate
     runtimeCrate --> pluginSdk
     runtimeCrate --> coreCrate
     pluginSdk --> coreCrate
@@ -49,7 +49,7 @@ reliably prove whether a proxy or endpoint is operated locally.
 flowchart TB
     subgraph current["Current: standalone RPC deployment"]
         ravenRun["raven run"] --> rpc["Local or hosted EVM JSON-RPC"]
-        rpc --> rpcAdapter["Alloy-backed RPC adapter"]
+        rpc --> rpcAdapter["RPC source (Alloy-backed)"]
         rpcAdapter --> eventsA["Normalized ChainEvent"]
     end
 
@@ -83,7 +83,7 @@ launch. Raven then runs in-process alongside that node, while the standalone
 `raven` binary remains the lightweight RPC deployment.
 
 ```text
-standalone: raven run --rpc-url ... -> Alloy RPC source -> Raven runtime
+standalone: raven run --rpc-url ... -> RPC source (Alloy-backed) -> Raven runtime
 
 embedded:   reth node [normal node args] + Raven plugin config
                 -> NodeBuilder::install_exex("raven", ...)
@@ -205,7 +205,7 @@ events:   Reverted(C) -> Reverted(B) -> Applied(X) -> Applied(Y)
 
 ```mermaid
 flowchart LR
-    chain["EVM JSON-RPC"] --> source["Alloy-backed RPC adapter"]
+    chain["EVM JSON-RPC"] --> source["RPC source (Alloy-backed)"]
     source --> sourceQueue["Bounded source channel"]
     sourceQueue --> gate["CLI reliability gate"]
     gate --> runtime["Runtime validation"]

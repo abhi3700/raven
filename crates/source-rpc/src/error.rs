@@ -1,11 +1,11 @@
 use thiserror::Error;
 
-/// Result returned by the Alloy-backed RPC event source.
-pub type AlloySourceResult<T = ()> = Result<T, AlloySourceError>;
+/// Result returned by the RPC event source.
+pub type RpcSourceResult<T = ()> = Result<T, RpcSourceError>;
 
 /// Errors produced while connecting to or reading from an Alloy provider.
 #[derive(Debug, Error)]
-pub enum AlloySourceError {
+pub enum RpcSourceError {
 	#[error("poll interval must be greater than zero")]
 	InvalidPollInterval,
 
@@ -71,7 +71,7 @@ pub enum AlloySourceError {
 	EventReceiverDropped,
 }
 
-impl AlloySourceError {
+impl RpcSourceError {
 	/// Returns whether reconnecting can reasonably recover from this failure.
 	pub const fn is_transient(&self) -> bool {
 		matches!(

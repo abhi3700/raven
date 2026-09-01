@@ -22,7 +22,7 @@ contribution, validation, and pull request workflow.
 | `raven-plugin-reorg-monitor` | `crates/plugins/reorg-monitor` | Library | Static canonical-chain transition monitor |
 | `raven-plugin-sdk` | `crates/plugin-sdk` | Library | Plugin trait, context, metadata, and errors |
 | `raven-runtime` | `crates/runtime` | Library | Plugin registration, lifecycle, validation, and dispatch |
-| `raven-source-alloy` | `crates/source-alloy` | Library | Alloy-backed JSON-RPC polling, WS subscriptions, reconciliation, and normalization |
+| `raven-source-rpc` | `crates/source-rpc` | Library | EVM JSON-RPC polling, WS subscriptions, reconciliation, and normalization |
 | `raven` | `crates/cli` | Binary | CLI parsing and source/runtime orchestration |
 
 ## `raven-core`
@@ -103,13 +103,13 @@ Public exports:
 See [Runtime reference](/docs/reference/runtime) for a single-page explanation
 of lifecycle, worker topology, receipts, outcomes, health, and failure isolation.
 
-## `raven-source-alloy`
+## `raven-source-rpc`
 
 Public exports:
 
-- `AlloySource`
-- `AlloySourceError`
-- `AlloySourceResult`
+- `RpcSource`
+- `RpcSourceError`
+- `RpcSourceResult`
 - `SourceStart`
 - `RetryPolicy`
 - `RpcTransport`
@@ -128,7 +128,7 @@ The binary crate owns:
 - Persistent RPC URL and bundled-plugin configuration.
 - Chain-specific atomic checkpoint persistence and at-least-once success gate.
 - Tracing initialization.
-- Alloy-backed RPC task creation.
+- RPC source task creation.
 - Endpoint inspection and runtime initialization from the discovered chain ID.
 - Ctrl+C handling and graceful shutdown.
 - The always-active block logger and configured bundled monitors used by `raven run`.

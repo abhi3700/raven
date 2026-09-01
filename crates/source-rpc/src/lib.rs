@@ -1,4 +1,4 @@
-//! Alloy-backed JSON-RPC source for Raven.
+//! EVM JSON-RPC source for Raven, backed by Alloy.
 //!
 //! This crate is the boundary between an EVM RPC node and Raven's
 //! source-independent runtime model. Alloy owns the transport client and native
@@ -39,8 +39,8 @@ mod converter;
 mod error;
 mod source;
 
-pub use error::{AlloySourceError, AlloySourceResult};
+pub use error::{RpcSourceError, RpcSourceResult};
 pub use source::{
-	AlloySource, BlockFetchMode, RetryPolicy, RpcEndpointInfo, RpcTransport, SourceStart,
+	BlockFetchMode, RetryPolicy, RpcEndpointInfo, RpcSource, RpcTransport, SourceStart,
 	inspect_rpc_endpoint,
 };

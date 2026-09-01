@@ -60,7 +60,8 @@ runtime owns lifecycle and dispatch. Plugins own application behavior.
 
 ## Current capabilities
 
-- Ingest from EVM-compatible HTTP(S) polling or WS(S) subscriptions through an Alloy-backed RPC adapter.
+- Ingest from EVM-compatible HTTP(S) polling or WS(S) subscriptions through the
+  RPC source, currently backed by Alloy.
 - Discover the endpoint's EIP-155 chain ID.
 - Accept any non-zero chain ID without a hard-coded chain allowlist.
 - Reconcile and fetch every observed block height in ascending order.

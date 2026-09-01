@@ -72,7 +72,7 @@ async fn handle_doctor(args: DoctorArgs) -> Result<()> {
 	let started = std::time::Instant::now();
 	let endpoint = tokio::time::timeout(
 		std::time::Duration::from_millis(args.timeout_ms),
-		raven_source_alloy::inspect_rpc_endpoint(&rpc_url),
+		raven_source_rpc::inspect_rpc_endpoint(&rpc_url),
 	)
 	.await
 	.map_err(|_| eyre::eyre!("RPC check timed out after {} ms", args.timeout_ms))??;

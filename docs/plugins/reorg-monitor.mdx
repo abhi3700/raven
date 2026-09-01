@@ -21,7 +21,7 @@ Installation saves an empty `reorg-monitor` configuration object because the
 plugin has no plugin-specific arguments. Remove it with
 `raven plugins remove reorg-monitor`.
 
-It has no RPC client and does not independently detect forks. The Alloy source
+It has no RPC client and does not independently detect forks. The RPC source
 owns canonical-chain reconciliation, validates block data, then supplies
 normalized `ChainEvent` values to the runtime. The monitor only reports that
 already-established transition.
@@ -57,7 +57,7 @@ block heights.
 
 ```mermaid
 sequenceDiagram
-    participant S as Alloy source
+    participant S as RPC source
     participant R as Raven runtime
     participant M as reorg-monitor
     S->>R: BlockApplied(100, A)

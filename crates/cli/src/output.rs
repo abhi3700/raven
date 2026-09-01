@@ -45,7 +45,7 @@ pub(crate) fn print_banner() {
 pub(crate) fn print_doctor(
 	version: &str,
 	rpc_url: &str,
-	endpoint: raven_source_alloy::RpcEndpointInfo,
+	endpoint: raven_source_rpc::RpcEndpointInfo,
 	elapsed: std::time::Duration,
 ) {
 	println!("{} {}", "Raven CLI".bright_blue().bold(), format!("v{version}").bright_cyan());

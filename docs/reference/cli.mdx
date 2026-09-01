@@ -315,12 +315,12 @@ for isolated development and automated tests.
 Raven uses `tracing` and reads `RUST_LOG`:
 
 ```bash
-RUST_LOG=raven=debug,raven_plugin_=debug,raven_source_alloy=debug \
+RUST_LOG=raven=debug,raven_plugin_=debug,raven_source_rpc=debug \
   raven run --rpc-url http://localhost:8545
 ```
 
 The default filter enables info logs for the CLI, statically linked
-`raven-plugin-*` crates, and Alloy-backed RPC adapter. Set `RUST_LOG` to
+`raven-plugin-*` crates, and RPC source. Set `RUST_LOG` to
 override those directives when a different level or target set is needed.
 
 In an interactive terminal, Raven also colors structured log fields by value

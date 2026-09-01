@@ -7,7 +7,7 @@ use raven_plugin_erc20_transfer::Erc20TransferPlugin;
 use raven_plugin_reorg_monitor::ReorgMonitorPlugin;
 use raven_plugin_sdk::{Plugin, PluginContext, PluginMetadata, PluginResult};
 use raven_runtime::{DispatchReceipt, PluginOutcome, PluginOutcomeStatus, Runtime};
-use raven_source_alloy::{AlloySource, SourceStart, inspect_rpc_endpoint};
+use raven_source_rpc::{RpcSource, SourceStart, inspect_rpc_endpoint};
 use tokio::{
 	sync::{broadcast, mpsc},
 	task::JoinHandle,
@@ -139,7 +139,7 @@ fn spawn_rpc_source(
 	start: SourceStart,
 	event_sender: mpsc::Sender<ChainEvent>,
 ) -> JoinHandle<Result<()>> {
-	let source = AlloySource::new(rpc_url)
+	let source = RpcSource::new(rpc_url)
 		.with_poll_interval(Duration::from_millis(args.poll_interval_ms))
 		.with_reconciliation_interval(Duration::from_millis(args.reconciliation_interval_ms))
 		.with_reorg_depth(args.reorg_depth)

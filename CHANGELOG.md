@@ -15,7 +15,7 @@ on August 25, 2026 (UTC).
 
 ### Added
 
-- Added typed, validated EVM logs to normalized block events. The Alloy source
+- Added typed, validated EVM logs to normalized block events. The RPC source
   fetches blocks and logs in one consistency-checked JSON-RPC batch by default,
   preserves hash-pinned sequential retrieval as an explicit mode, and retains
   logs for matching reorg reversals.
@@ -31,7 +31,10 @@ on August 25, 2026 (UTC).
 
 - Shortened the primary workspace crate directories to `crates/cli`,
   `crates/core`, `crates/plugin-sdk`, `crates/runtime`, and
-  `crates/source-alloy` while preserving their existing Cargo package names.
+  `crates/source-rpc` while retaining the `raven-*` package convention.
+- Renamed the RPC source crate and public API to `raven-source-rpc` and
+  `RpcSource`, aligning names with the data source while retaining Alloy as the
+  internal provider and RPC-type implementation.
 - Replaced string block and parent hashes with `alloy_primitives::B256` while
   preserving their `0x`-prefixed JSON representation.
 - Implemented persistent `raven plugins install` and `remove` for bundled
@@ -101,14 +104,14 @@ on August 25, 2026 (UTC).
 ### Added
 
 - Added the Mintlify documentation site with getting-started guides,
-  architecture and event concepts, plugin and Alloy guides, CLI reference, and
-  a phased roadmap.
+  architecture and event concepts, plugin and RPC-source guides, CLI reference,
+  and a phased roadmap.
 - Added local documentation preview and validation tooling.
 
 ### Changed
 
 - Refactored the CLI into parsing and runner/orchestration modules and connected
-  the Alloy source, runtime, and built-in block logger into a working command.
+  the RPC source, runtime, and built-in block logger into a working command.
 - Reworked the README and documentation to separate implemented behavior from
   planned functionality and to consistently describe Raven as a plugin system.
 - Integrated the Phase 1 development branch.
@@ -142,8 +145,8 @@ on August 25, 2026 (UTC).
 
 ### Added
 
-- Added the Alloy event-source crate with JSON-RPC ingestion, event conversion,
-  error handling, and an end-to-end example.
+- Added the RPC event-source crate, backed by Alloy, with JSON-RPC ingestion,
+  event conversion, error handling, and an end-to-end example.
 
 <details>
 <summary>Commits (1)</summary>
@@ -157,7 +160,7 @@ on August 25, 2026 (UTC).
 ### Added
 
 - Established the project license and Raven logo.
-- Initialized the Rust workspace with CLI, core, plugin SDK, and Alloy source
+- Initialized the Rust workspace with CLI, core, plugin SDK, and RPC source
   crate scaffolding, plus shared toolchain and formatting configuration.
 - Added the first README describing Raven's purpose and intended architecture.
 - Implemented `raven-core` with chain, block, event, and error domain types.

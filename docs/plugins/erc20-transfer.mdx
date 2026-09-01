@@ -21,13 +21,13 @@ to the **Plugins** group in `docs.json`.
 
 ## Processing flow
 
-The Alloy source fetches generic EVM logs and includes them in the normalized
+The RPC source fetches generic EVM logs and includes them in the normalized
 `BlockEvent`. The plugin derives ERC-20 meaning from that payload; it never
 polls the node itself.
 
 ```mermaid
 flowchart LR
-    rpc[EVM JSON-RPC] --> source[Alloy source]
+    rpc[EVM JSON-RPC] --> source[RPC source backed by Alloy]
     source --> block[BlockEvent with EvmLog values]
     block --> runtime[Raven runtime]
     runtime --> plugin[erc20-transfer plugin]
@@ -159,7 +159,7 @@ row limit. Set the plugin target to `DEBUG` when full, structured per-transfer
 fields are also needed:
 
 ```bash
-RUST_LOG=raven=info,raven_plugin_erc20_transfer=debug,raven_source_alloy=info \
+RUST_LOG=raven=info,raven_plugin_erc20_transfer=debug,raven_source_rpc=info \
   raven run --rpc-url http://localhost:8545
 ```
 
@@ -281,7 +281,7 @@ Run the opt-in live example against an EVM endpoint:
 NODE_RPC_URL=https://your-evm-rpc.example \
 ERC20_TRANSFER_MIN_AMOUNT=1000000 \
 ERC20_TOKEN_ADDRESS=0x1111111111111111111111111111111111111111 \
-cargo run -p raven-source-alloy --example e2e
+cargo run -p raven-source-rpc --example e2e
 ```
 
 The live example accepts one optional `ERC20_TOKEN_ADDRESS`. Use `raven run`

@@ -19,7 +19,7 @@
 //!
 //! Keeping conversion here prevents Alloy RPC types from leaking into Raven's runtime or plugins.
 
-use crate::{AlloySourceError, AlloySourceResult};
+use crate::{RpcSourceError, RpcSourceResult};
 use alloy::{
 	consensus::BlockHeader,
 	network::BlockResponse,
@@ -36,10 +36,10 @@ pub(crate) fn convert_block(
 	chain_id: ChainId,
 	block: &Block,
 	logs: Vec<Log>,
-) -> AlloySourceResult<ChainEvent> {
+) -> RpcSourceResult<ChainEvent> {
 	let header = block.header();
 	let transaction_count = u64::try_from(block.transactions().len()).map_err(|error| {
-		AlloySourceError::BlockConversion(format!("transaction count does not fit in u64: {error}"))
+		RpcSourceError::BlockConversion(format!("transaction count does not fit in u64: {error}"))
 	})?;
 	let logs = convert_logs(logs, header.number(), header.hash, transaction_count)?;
 
@@ -52,7 +52,7 @@ pub(crate) fn convert_block(
 		transaction_count,
 		logs,
 	)
-	.map_err(|error| AlloySourceError::BlockConversion(error.to_string()))?;
+	.map_err(|error| RpcSourceError::BlockConversion(error.to_string()))?;
 
 	Ok(ChainEvent::BlockApplied(normalized_block))
 }
@@ -62,23 +62,23 @@ fn convert_logs(
 	block_number: u64,
 	block_hash: alloy::primitives::B256,
 	transaction_count: u64,
-) -> AlloySourceResult<Vec<EvmLog>> {
+) -> RpcSourceResult<Vec<EvmLog>> {
 	let mut normalized = Vec::with_capacity(logs.len());
 
 	for log in logs {
 		if log.removed {
-			return Err(AlloySourceError::LogConversion(format!(
+			return Err(RpcSourceError::LogConversion(format!(
 				"RPC marked a log from block {block_number} as removed"
 			)));
 		}
 		if log.block_number != Some(block_number) {
-			return Err(AlloySourceError::LogConversion(format!(
+			return Err(RpcSourceError::LogConversion(format!(
 				"log block number {:?} does not match requested block {block_number}",
 				log.block_number
 			)));
 		}
 		if log.block_hash != Some(block_hash) {
-			return Err(AlloySourceError::LogConversion(format!(
+			return Err(RpcSourceError::LogConversion(format!(
 				"log block hash {:?} does not match requested block {block_hash}",
 				log.block_hash
 			)));
@@ -100,7 +100,7 @@ fn convert_logs(
 				transaction_index,
 				log_index,
 			)
-			.map_err(|error| AlloySourceError::LogConversion(error.to_string()))?,
+			.map_err(|error| RpcSourceError::LogConversion(error.to_string()))?,
 		);
 	}
 
@@ -110,7 +110,7 @@ fn convert_logs(
 	// a log-specific source error before the full block is constructed.
 	for log in &normalized {
 		if log.transaction_index() >= transaction_count {
-			return Err(AlloySourceError::LogConversion(format!(
+			return Err(RpcSourceError::LogConversion(format!(
 				"log transaction index {} is outside block transaction count {transaction_count}",
 				log.transaction_index()
 			)));
@@ -120,7 +120,7 @@ fn convert_logs(
 		(logs[0].transaction_index(), logs[0].log_index()) ==
 			(logs[1].transaction_index(), logs[1].log_index())
 	}) {
-		return Err(AlloySourceError::LogConversion(
+		return Err(RpcSourceError::LogConversion(
 			"RPC returned duplicate transaction/log positions".to_owned(),
 		));
 	}
@@ -132,9 +132,9 @@ fn required_log_field<T>(
 	value: Option<T>,
 	field: &'static str,
 	block_number: u64,
-) -> AlloySourceResult<T> {
+) -> RpcSourceResult<T> {
 	value.ok_or_else(|| {
-		AlloySourceError::LogConversion(format!(
+		RpcSourceError::LogConversion(format!(
 			"mined log from block {block_number} is missing {field}"
 		))
 	})
@@ -204,7 +204,7 @@ mod tests {
 
 		assert!(matches!(
 			convert_block(chain_id, &block, vec![log]),
-			Err(AlloySourceError::LogConversion(_))
+			Err(RpcSourceError::LogConversion(_))
 		));
 	}
 
@@ -217,7 +217,7 @@ mod tests {
 
 		assert!(matches!(
 			convert_block(chain_id, &block, vec![log]),
-			Err(AlloySourceError::LogConversion(_))
+			Err(RpcSourceError::LogConversion(_))
 		));
 	}
 }

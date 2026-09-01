@@ -1,4 +1,4 @@
-//! Transport-aware Alloy JSON-RPC ingestion.
+//! Transport-aware EVM JSON-RPC ingestion backed by Alloy.
 //!
 //! HTTP(S) polls `eth_blockNumber`; WS(S) uses `eth_subscribe("newHeads")`
 //! with periodic reconciliation. Both paths use the same bounded canonical
@@ -46,7 +46,7 @@
 //!        mpsc::Sender<ChainEvent>
 //! ```
 
-use crate::{AlloySourceError, AlloySourceResult, converter::convert_block};
+use crate::{RpcSourceError, RpcSourceResult, converter::convert_block};
 use alloy::{
 	consensus::BlockHeader,
 	eips::BlockNumberOrTag,
@@ -104,7 +104,7 @@ pub enum SourceStart {
 
 /// Capped exponential retry configuration.
 ///
-/// `AlloySource::run` applies this policy only to transient source failures,
+/// `RpcSource::run` applies this policy only to transient source failures,
 /// such as dropped subscriptions, unavailable blocks, connection failures, or a
 /// canonical-chain change observed while catching up. Permanent configuration
 /// and validation errors return immediately.
@@ -141,14 +141,14 @@ impl Default for RetryPolicy {
 }
 
 impl RetryPolicy {
-	fn validate(self) -> AlloySourceResult<Self> {
+	fn validate(self) -> RpcSourceResult<Self> {
 		if self.initial_delay.is_zero() ||
 			self.max_delay.is_zero() ||
 			self.initial_delay > self.max_delay ||
 			!self.jitter_ratio.is_finite() ||
 			!(0.0..=1.0).contains(&self.jitter_ratio)
 		{
-			return Err(AlloySourceError::InvalidRetryPolicy);
+			return Err(RpcSourceError::InvalidRetryPolicy);
 		}
 		Ok(self)
 	}
@@ -212,14 +212,14 @@ pub enum RpcTransport {
 }
 
 impl RpcTransport {
-	fn from_url(rpc_url: &str) -> AlloySourceResult<Self> {
+	fn from_url(rpc_url: &str) -> RpcSourceResult<Self> {
 		match rpc_url
 			.parse::<BuiltInConnectionString>()
-			.map_err(|error| AlloySourceError::InvalidRpcUrl(error.to_string()))?
+			.map_err(|error| RpcSourceError::InvalidRpcUrl(error.to_string()))?
 		{
 			BuiltInConnectionString::Http(_) => Ok(Self::Http),
 			BuiltInConnectionString::Ws(_, _) => Ok(Self::WebSocket),
-			_ => Err(AlloySourceError::InvalidRpcUrl(
+			_ => Err(RpcSourceError::InvalidRpcUrl(
 				"unsupported transport; expected HTTP(S) or WS(S)".to_owned(),
 			)),
 		}
@@ -296,21 +296,21 @@ pub struct RpcEndpointInfo {
 ///      v
 /// RpcEndpointInfo
 /// ```
-pub async fn inspect_rpc_endpoint(rpc_url: &str) -> AlloySourceResult<RpcEndpointInfo> {
+pub async fn inspect_rpc_endpoint(rpc_url: &str) -> RpcSourceResult<RpcEndpointInfo> {
 	let transport = RpcTransport::from_url(rpc_url)?;
 	match transport {
 		RpcTransport::Http => {
 			let provider = ProviderBuilder::new()
 				.connect(rpc_url)
 				.await
-				.map_err(|error| AlloySourceError::Connection(error.to_string()))?;
+				.map_err(|error| RpcSourceError::Connection(error.to_string()))?;
 			inspect_provider(&provider, transport).await
 		},
 		RpcTransport::WebSocket => {
 			let provider = ProviderBuilder::new()
 				.connect_ws(WsConnect::new(rpc_url))
 				.await
-				.map_err(|error| AlloySourceError::Connection(error.to_string()))?;
+				.map_err(|error| RpcSourceError::Connection(error.to_string()))?;
 			inspect_provider(&provider, transport).await
 		},
 	}
@@ -319,7 +319,7 @@ pub async fn inspect_rpc_endpoint(rpc_url: &str) -> AlloySourceResult<RpcEndpoin
 async fn inspect_provider(
 	provider: &impl Provider,
 	transport: RpcTransport,
-) -> AlloySourceResult<RpcEndpointInfo> {
+) -> RpcSourceResult<RpcEndpointInfo> {
 	Ok(RpcEndpointInfo {
 		chain_id: validated_chain_id(provider).await?,
 		latest_block: latest_block_number(provider).await?,
@@ -329,13 +329,13 @@ async fn inspect_provider(
 
 /// Streams normalized events from an EVM-compatible JSON-RPC endpoint.
 ///
-/// `AlloySource` owns source configuration, not plugin execution. Its output is
+/// `RpcSource` owns source configuration, not plugin execution. Its output is
 /// a stream of ordered `ChainEvent` values sent through the provided channel.
 /// A caller such as the CLI decides when those events are considered durably
 /// acknowledged.
 ///
 /// ```text
-/// AlloySource config
+/// RpcSource config
 ///   rpc_url
 ///   start
 ///   reorg_depth
@@ -349,7 +349,7 @@ async fn inspect_provider(
 ///        v
 /// ordered ChainEvent stream
 /// ```
-pub struct AlloySource {
+pub struct RpcSource {
 	rpc_url: String,
 	poll_interval: Duration,
 	reconciliation_interval: Duration,
@@ -359,7 +359,7 @@ pub struct AlloySource {
 	block_fetch_mode: BlockFetchMode,
 }
 
-impl AlloySource {
+impl RpcSource {
 	/// Creates an Alloy-backed RPC source with production-oriented defaults.
 	///
 	/// By default Raven starts at the latest observed head, retains 64 recent
@@ -443,7 +443,7 @@ impl AlloySource {
 	/// Keeping the cursor outside the reconnect loop is important: after a
 	/// dropped RPC connection, Raven resumes from its last emitted canonical
 	/// position instead of rediscovering state from scratch.
-	pub async fn run(self, sender: mpsc::Sender<ChainEvent>) -> AlloySourceResult {
+	pub async fn run(self, sender: mpsc::Sender<ChainEvent>) -> RpcSourceResult {
 		let transport = RpcTransport::from_url(&self.rpc_url)?;
 		self.validate()?;
 		let retry_policy = self.retry_policy.validate()?;
@@ -471,15 +471,15 @@ impl AlloySource {
 		}
 	}
 
-	fn validate(&self) -> AlloySourceResult {
+	fn validate(&self) -> RpcSourceResult {
 		if self.poll_interval.is_zero() {
-			return Err(AlloySourceError::InvalidPollInterval);
+			return Err(RpcSourceError::InvalidPollInterval);
 		}
 		if self.reconciliation_interval.is_zero() {
-			return Err(AlloySourceError::InvalidReconciliationInterval);
+			return Err(RpcSourceError::InvalidReconciliationInterval);
 		}
 		if self.reorg_depth == 0 {
-			return Err(AlloySourceError::InvalidReorgDepth);
+			return Err(RpcSourceError::InvalidReorgDepth);
 		}
 		Ok(())
 	}
@@ -508,11 +508,11 @@ impl AlloySource {
 		&self,
 		sender: &mpsc::Sender<ChainEvent>,
 		cursor: &mut CanonicalCursor,
-	) -> AlloySourceResult {
+	) -> RpcSourceResult {
 		let provider = ProviderBuilder::new()
 			.connect(&self.rpc_url)
 			.await
-			.map_err(|error| AlloySourceError::Connection(error.to_string()))?;
+			.map_err(|error| RpcSourceError::Connection(error.to_string()))?;
 		let chain_id = validated_chain_id(&provider).await?;
 		cursor.validate_chain(chain_id)?;
 		let latest = latest_block_number(&provider).await?;
@@ -567,18 +567,18 @@ impl AlloySource {
 		&self,
 		sender: &mpsc::Sender<ChainEvent>,
 		cursor: &mut CanonicalCursor,
-	) -> AlloySourceResult {
+	) -> RpcSourceResult {
 		let provider = ProviderBuilder::new()
 			.connect_ws(WsConnect::new(&self.rpc_url))
 			.await
-			.map_err(|error| AlloySourceError::Connection(error.to_string()))?;
+			.map_err(|error| RpcSourceError::Connection(error.to_string()))?;
 		let chain_id = validated_chain_id(&provider).await?;
 		cursor.validate_chain(chain_id)?;
 		let subscription = provider
 			.subscribe_blocks()
 			.channel_size(SUBSCRIPTION_CHANNEL_CAPACITY)
 			.await
-			.map_err(|error| AlloySourceError::Subscription(error.to_string()))?;
+			.map_err(|error| RpcSourceError::Subscription(error.to_string()))?;
 		let mut heads = subscription.into_stream();
 		let latest = latest_block_number(&provider).await?;
 		cursor.initialize(latest);
@@ -598,7 +598,7 @@ impl AlloySource {
 		loop {
 			tokio::select! {
 				maybe_header = heads.next() => {
-					let header = maybe_header.ok_or(AlloySourceError::SubscriptionEnded)?;
+					let header = maybe_header.ok_or(RpcSourceError::SubscriptionEnded)?;
 					reconcile_through(&canonical_provider, chain_id, sender, cursor, header.number).await?;
 				}
 				_ = reconciliation.tick() => {
@@ -633,7 +633,7 @@ struct CanonicalCursor {
 }
 
 impl CanonicalCursor {
-	fn new(start: SourceStart, reorg_depth: usize) -> AlloySourceResult<Self> {
+	fn new(start: SourceStart, reorg_depth: usize) -> RpcSourceResult<Self> {
 		let (window, next_block) = match start {
 			SourceStart::Latest => (VecDeque::new(), None),
 			SourceStart::Block(block) => (VecDeque::new(), Some(block)),
@@ -650,11 +650,11 @@ impl CanonicalCursor {
 		self.next_block.get_or_insert(latest);
 	}
 
-	fn validate_chain(&self, chain_id: ChainId) -> AlloySourceResult {
+	fn validate_chain(&self, chain_id: ChainId) -> RpcSourceResult {
 		if let Some(block) = self.window.front() &&
 			block.chain_id() != chain_id
 		{
-			return Err(AlloySourceError::InvalidResumeWindow(format!(
+			return Err(RpcSourceError::InvalidResumeWindow(format!(
 				"checkpoint chain {} does not match RPC chain {}",
 				block.chain_id().get(),
 				chain_id.get()
@@ -686,7 +686,7 @@ impl CanonicalCursor {
 ///        ^              |
 ///        +--------------+ parent link does not match
 /// ```
-fn validate_resume_window(blocks: &[BlockEvent]) -> AlloySourceResult {
+fn validate_resume_window(blocks: &[BlockEvent]) -> RpcSourceResult {
 	for pair in blocks.windows(2) {
 		let parent = &pair[0];
 		let child = &pair[1];
@@ -694,7 +694,7 @@ fn validate_resume_window(blocks: &[BlockEvent]) -> AlloySourceResult {
 			child.block_number() != parent.block_number().saturating_add(1) ||
 			child.parent_hash() != parent.block_hash()
 		{
-			return Err(AlloySourceError::InvalidResumeWindow(
+			return Err(RpcSourceError::InvalidResumeWindow(
 				"blocks must be one contiguous parent-linked chain".to_owned(),
 			));
 		}
@@ -777,7 +777,7 @@ async fn reconcile_through(
 	sender: &mpsc::Sender<ChainEvent>,
 	cursor: &mut CanonicalCursor,
 	latest: u64,
-) -> AlloySourceResult {
+) -> RpcSourceResult {
 	if let Some(earliest) = cursor.window.front().map(BlockEvent::block_number) {
 		let mut common_index = None;
 		for (index, retained) in cursor.window.iter().enumerate().rev() {
@@ -792,7 +792,7 @@ async fn reconcile_through(
 		}
 
 		let Some(common_index) = common_index else {
-			return Err(AlloySourceError::DeepReorg { earliest_block: earliest });
+			return Err(RpcSourceError::DeepReorg { earliest_block: earliest });
 		};
 
 		let reverted_blocks = cursor.window.len().saturating_sub(common_index + 1);
@@ -821,7 +821,7 @@ async fn reconcile_through(
 			sender
 				.send(ChainEvent::BlockReverted(reverted))
 				.await
-				.map_err(|_| AlloySourceError::EventReceiverDropped)?;
+				.map_err(|_| RpcSourceError::EventReceiverDropped)?;
 		}
 		cursor.next_block =
 			cursor.window.back().map(|block| block.block_number().saturating_add(1));
@@ -834,14 +834,14 @@ async fn reconcile_through(
 			block.block_number() == parent.block_number().saturating_add(1) &&
 			block.parent_hash() != parent.block_hash()
 		{
-			return Err(AlloySourceError::CanonicalChanged { block_number: next });
+			return Err(RpcSourceError::CanonicalChanged { block_number: next });
 		}
 
 		debug!(chain_id = chain_id.get(), block_number = block.block_number(), block_hash = %block.block_hash(), transactions = block.transaction_count(), logs = block.logs().len(), "received canonical block event");
 		sender
 			.send(ChainEvent::BlockApplied(block.clone()))
 			.await
-			.map_err(|_| AlloySourceError::EventReceiverDropped)?;
+			.map_err(|_| RpcSourceError::EventReceiverDropped)?;
 		cursor.push(block);
 		next = next.saturating_add(1);
 		cursor.next_block = Some(next);
@@ -853,7 +853,7 @@ async fn fetch_block(
 	provider: &impl CanonicalBlockProvider,
 	chain_id: ChainId,
 	block_number: u64,
-) -> AlloySourceResult<BlockEvent> {
+) -> RpcSourceResult<BlockEvent> {
 	provider.canonical_block(chain_id, block_number).await
 }
 
@@ -878,7 +878,7 @@ trait CanonicalBlockProvider {
 		&self,
 		chain_id: ChainId,
 		block_number: u64,
-	) -> AlloySourceResult<BlockEvent>;
+	) -> RpcSourceResult<BlockEvent>;
 }
 
 struct RpcCanonicalBlockProvider<'a, P> {
@@ -900,7 +900,7 @@ where
 		&self,
 		chain_id: ChainId,
 		block_number: u64,
-	) -> AlloySourceResult<BlockEvent> {
+	) -> RpcSourceResult<BlockEvent> {
 		match self.block_fetch_mode {
 			BlockFetchMode::Batch =>
 				fetch_canonical_block_batch(self.provider, chain_id, block_number).await,
@@ -914,17 +914,17 @@ async fn fetch_canonical_block_sequential(
 	provider: &impl Provider,
 	chain_id: ChainId,
 	block_number: u64,
-) -> AlloySourceResult<BlockEvent> {
+) -> RpcSourceResult<BlockEvent> {
 	let block = provider
 		.get_block_by_number(BlockNumberOrTag::Number(block_number))
 		.await
-		.map_err(|error| AlloySourceError::BlockRequest(error.to_string()))?
+		.map_err(|error| RpcSourceError::BlockRequest(error.to_string()))?
 		.ok_or_else(|| missing_block_error(block_number))?;
 	let filter = Filter::new().at_block_hash(block.header.hash);
 	let logs = provider
 		.get_logs(&filter)
 		.await
-		.map_err(|error| AlloySourceError::LogRequest(error.to_string()))?;
+		.map_err(|error| RpcSourceError::LogRequest(error.to_string()))?;
 	Ok(convert_block(chain_id, &block, logs)?.block().clone())
 }
 
@@ -932,7 +932,7 @@ async fn fetch_canonical_block_batch(
 	provider: &impl Provider,
 	chain_id: ChainId,
 	block_number: u64,
-) -> AlloySourceResult<BlockEvent> {
+) -> RpcSourceResult<BlockEvent> {
 	let block_tag = BlockNumberOrTag::Number(block_number);
 	let block_params = (block_tag, false);
 	let filter = Filter::new().select(block_number);
@@ -940,36 +940,36 @@ async fn fetch_canonical_block_batch(
 	let mut batch = BatchRequest::new(provider.client());
 	let block_waiter = batch
 		.add_call::<_, Option<Block>>("eth_getBlockByNumber", &block_params)
-		.map_err(|error| AlloySourceError::BlockRequest(error.to_string()))?;
+		.map_err(|error| RpcSourceError::BlockRequest(error.to_string()))?;
 	let logs_waiter = batch
 		.add_call::<_, Vec<Log>>("eth_getLogs", &log_params)
-		.map_err(|error| AlloySourceError::LogRequest(error.to_string()))?;
+		.map_err(|error| RpcSourceError::LogRequest(error.to_string()))?;
 
-	batch.await.map_err(|error| AlloySourceError::BatchRequest(error.to_string()))?;
+	batch.await.map_err(|error| RpcSourceError::BatchRequest(error.to_string()))?;
 	let block = block_waiter
 		.await
-		.map_err(|error| AlloySourceError::BlockRequest(error.to_string()))?
+		.map_err(|error| RpcSourceError::BlockRequest(error.to_string()))?
 		.ok_or_else(|| missing_block_error(block_number))?;
 	let logs = logs_waiter
 		.await
-		.map_err(|error| AlloySourceError::LogRequest(error.to_string()))?;
+		.map_err(|error| RpcSourceError::LogRequest(error.to_string()))?;
 
 	validate_batch_consistency(&block, &logs, block_number)?;
 	Ok(convert_block(chain_id, &block, logs)?.block().clone())
 }
 
-fn missing_block_error(block_number: u64) -> AlloySourceError {
-	AlloySourceError::BlockRequest(format!("block {block_number} was not returned by RPC"))
+fn missing_block_error(block_number: u64) -> RpcSourceError {
+	RpcSourceError::BlockRequest(format!("block {block_number} was not returned by RPC"))
 }
 
 fn validate_batch_consistency(
 	block: &Block,
 	logs: &[Log],
 	requested_block: u64,
-) -> AlloySourceResult {
+) -> RpcSourceResult {
 	let header = block.header();
 	if header.number() != requested_block {
-		return Err(AlloySourceError::BlockConversion(format!(
+		return Err(RpcSourceError::BlockConversion(format!(
 			"RPC returned block {} for requested block {requested_block}",
 			header.number()
 		)));
@@ -979,30 +979,30 @@ fn validate_batch_consistency(
 		.iter()
 		.any(|log| log.block_number != Some(requested_block) || log.block_hash != Some(header.hash))
 	{
-		return Err(AlloySourceError::CanonicalChanged { block_number: requested_block });
+		return Err(RpcSourceError::CanonicalChanged { block_number: requested_block });
 	}
 
 	let returned_logs_bloom = alloy::primitives::logs_bloom(logs.iter().map(|log| &log.inner));
 	if returned_logs_bloom != header.logs_bloom() {
-		return Err(AlloySourceError::CanonicalChanged { block_number: requested_block });
+		return Err(RpcSourceError::CanonicalChanged { block_number: requested_block });
 	}
 
 	Ok(())
 }
 
-async fn validated_chain_id(provider: &impl Provider) -> AlloySourceResult<ChainId> {
+async fn validated_chain_id(provider: &impl Provider) -> RpcSourceResult<ChainId> {
 	let raw = provider
 		.get_chain_id()
 		.await
-		.map_err(|error| AlloySourceError::ChainIdRequest(error.to_string()))?;
-	ChainId::new(raw).map_err(|_| AlloySourceError::InvalidChainId(raw))
+		.map_err(|error| RpcSourceError::ChainIdRequest(error.to_string()))?;
+	ChainId::new(raw).map_err(|_| RpcSourceError::InvalidChainId(raw))
 }
 
-async fn latest_block_number(provider: &impl Provider) -> AlloySourceResult<u64> {
+async fn latest_block_number(provider: &impl Provider) -> RpcSourceResult<u64> {
 	provider
 		.get_block_number()
 		.await
-		.map_err(|error| AlloySourceError::BlockRequest(error.to_string()))
+		.map_err(|error| RpcSourceError::BlockRequest(error.to_string()))
 }
 
 #[cfg(test)]
@@ -1053,7 +1053,7 @@ mod tests {
 
 	#[test]
 	fn batch_is_the_default_block_fetch_mode() {
-		let source = AlloySource::new("http://localhost:8545");
+		let source = RpcSource::new("http://localhost:8545");
 
 		assert_eq!(BlockFetchMode::default(), BlockFetchMode::Batch);
 		assert_eq!(source.block_fetch_mode, BlockFetchMode::Batch);
@@ -1110,7 +1110,7 @@ mod tests {
 
 		assert!(matches!(
 			error,
-			AlloySourceError::CanonicalChanged { block_number: RPC_BLOCK_NUMBER }
+			RpcSourceError::CanonicalChanged { block_number: RPC_BLOCK_NUMBER }
 		));
 	}
 
@@ -1122,30 +1122,30 @@ mod tests {
 
 		assert!(matches!(
 			error,
-			AlloySourceError::CanonicalChanged { block_number: RPC_BLOCK_NUMBER }
+			RpcSourceError::CanonicalChanged { block_number: RPC_BLOCK_NUMBER }
 		));
 	}
 
 	#[tokio::test]
 	async fn rejects_zero_intervals_before_connecting() {
 		let (sender, _receiver) = mpsc::channel(1);
-		let error = AlloySource::new("http://localhost:8545")
+		let error = RpcSource::new("http://localhost:8545")
 			.with_poll_interval(Duration::ZERO)
 			.run(sender)
 			.await
 			.expect_err("zero interval must fail");
-		assert!(matches!(error, AlloySourceError::InvalidPollInterval));
+		assert!(matches!(error, RpcSourceError::InvalidPollInterval));
 	}
 
 	#[tokio::test]
 	async fn rejects_invalid_rpc_url_before_interval_validation() {
 		let (sender, _receiver) = mpsc::channel(1);
-		let error = AlloySource::new("not-a-url")
+		let error = RpcSource::new("not-a-url")
 			.with_poll_interval(Duration::ZERO)
 			.run(sender)
 			.await
 			.expect_err("invalid RPC URL should fail before interval validation");
-		assert!(matches!(error, AlloySourceError::InvalidRpcUrl(_)));
+		assert!(matches!(error, RpcSourceError::InvalidRpcUrl(_)));
 	}
 
 	#[test]
@@ -1175,16 +1175,16 @@ mod tests {
 	#[test]
 	fn temporary_omissions_and_transport_failures_are_retryable() {
 		for error in [
-			AlloySourceError::Connection("offline".to_owned()),
-			AlloySourceError::BlockRequest("fixture omitted block".to_owned()),
-			AlloySourceError::LogRequest("fixture omitted logs".to_owned()),
-			AlloySourceError::BatchRequest("fixture rejected batch".to_owned()),
-			AlloySourceError::SubscriptionEnded,
-			AlloySourceError::CanonicalChanged { block_number: 12 },
+			RpcSourceError::Connection("offline".to_owned()),
+			RpcSourceError::BlockRequest("fixture omitted block".to_owned()),
+			RpcSourceError::LogRequest("fixture omitted logs".to_owned()),
+			RpcSourceError::BatchRequest("fixture rejected batch".to_owned()),
+			RpcSourceError::SubscriptionEnded,
+			RpcSourceError::CanonicalChanged { block_number: 12 },
 		] {
 			assert!(error.is_transient());
 		}
-		assert!(!AlloySourceError::DeepReorg { earliest_block: 10 }.is_transient());
+		assert!(!RpcSourceError::DeepReorg { earliest_block: 10 }.is_transient());
 	}
 
 	#[test]
@@ -1335,9 +1335,9 @@ mod tests {
 			&self,
 			_chain_id: ChainId,
 			block_number: u64,
-		) -> AlloySourceResult<BlockEvent> {
+		) -> RpcSourceResult<BlockEvent> {
 			self.blocks.lock().unwrap().get(&block_number).cloned().ok_or_else(|| {
-				AlloySourceError::BlockRequest(format!("fixture omitted block {block_number}"))
+				RpcSourceError::BlockRequest(format!("fixture omitted block {block_number}"))
 			})
 		}
 	}

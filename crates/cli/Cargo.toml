@@ -21,7 +21,7 @@ raven-plugin-erc20-transfer = { path = "../plugins/erc20-transfer" }
 raven-plugin-reorg-monitor = { path = "../plugins/reorg-monitor" }
 raven-plugin-sdk = { path = "../plugin-sdk" }
 raven-runtime = { path = "../runtime" }
-raven-source-alloy = { path = "../source-alloy" }
+raven-source-rpc = { path = "../source-rpc" }
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

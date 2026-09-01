@@ -6,7 +6,7 @@ members = [
     "crates/plugins/*",
     "crates/plugin-sdk",
     "crates/runtime",
-    "crates/source-alloy",
+    "crates/source-rpc",
 ]
 
 [workspace.package]

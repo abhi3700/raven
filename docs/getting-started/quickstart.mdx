@@ -6,8 +6,8 @@ description: "Connect Raven to an EVM JSON-RPC endpoint and process live block e
 ## 1. Choose an RPC endpoint
 
 Raven supports EVM-compatible HTTP(S) and WebSocket (WS/WSS) JSON-RPC
-endpoints through an Alloy-backed adapter. You may use a local node or a hosted
-provider; both use the same RPC ingestion path.
+endpoints through the RPC source, currently backed by Alloy. You may use a local
+node or a hosted provider; both use the same RPC ingestion path.
 
 Persist the endpoint once:
 
@@ -185,7 +185,7 @@ without starting plugins.
     <Card
         title="RPC ingestion behavior"
         icon="radio"
-        href="/docs/guides/alloy-source"
+        href="/docs/guides/rpc-source"
     >
         Learn the subscription, polling, and catch-up guarantees.
     </Card>

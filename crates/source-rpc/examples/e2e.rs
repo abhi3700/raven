@@ -5,7 +5,7 @@
 //! ```text
 //! EVM JSON-RPC
 //!     ↓
-//! AlloySource
+//! RpcSource
 //!     ↓
 //! mpsc::channel<ChainEvent>
 //!     ↓
@@ -18,7 +18,7 @@
 //!
 //! ```sh
 //! NODE_RPC_URL=https://your-evm-rpc.example \
-//! cargo run -p raven-source-alloy --example e2e
+//! cargo run -p raven-source-rpc --example e2e
 //! ```
 //!
 //! Enable the transfer monitor with a raw-unit threshold and optionally one token contract:
@@ -27,12 +27,12 @@
 //! NODE_RPC_URL=https://your-evm-rpc.example \
 //! ERC20_TRANSFER_MIN_AMOUNT=1000000000000000000000 \
 //! ERC20_TOKEN_ADDRESS=0x1111111111111111111111111111111111111111 \
-//! cargo run -p raven-source-alloy --example e2e
+//! cargo run -p raven-source-rpc --example e2e
 //! ```
 //!
 //! The endpoint's chain ID is discovered at runtime. Example output:
 //! ```
-//! INFO raven_source_alloy::source: connected HTTP polling event source chain_id=8453
+//! INFO raven_source_rpc::source: connected HTTP polling event source chain_id=8453
 //! INFO e2e: plugin started plugin="block-logger" chain_id=8453
 //! block=#12345678   txs=25   hash=0x...
 //! ```
@@ -46,7 +46,7 @@ use raven_core::ChainEvent;
 use raven_plugin_erc20_transfer::{Erc20TransferConfig, Erc20TransferPlugin};
 use raven_plugin_sdk::{Plugin, PluginContext, PluginMetadata, PluginResult};
 use raven_runtime::Runtime;
-use raven_source_alloy::AlloySource;
+use raven_source_rpc::RpcSource;
 use tokio::sync::mpsc;
 use tracing::{error, info};
 
@@ -109,7 +109,7 @@ async fn main() -> eyre::Result<()> {
 
 	let (event_sender, mut event_receiver) = mpsc::channel(EVENT_CHANNEL_CAPACITY);
 
-	let source = AlloySource::new(rpc_url).with_poll_interval(Duration::from_secs(4));
+	let source = RpcSource::new(rpc_url).with_poll_interval(Duration::from_secs(4));
 
 	let source_task = tokio::spawn(async move { source.run(event_sender).await });
 	let mut runtime = None;
@@ -199,7 +199,7 @@ fn init_tracing() {
 	tracing_subscriber::fmt()
 		.with_env_filter(
 			tracing_subscriber::EnvFilter::try_from_default_env()
-				.unwrap_or_else(|_| "raven=info,raven_source_alloy=info".into()),
+				.unwrap_or_else(|_| "raven=info,raven_source_rpc=info".into()),
 		)
 		.init();
 }

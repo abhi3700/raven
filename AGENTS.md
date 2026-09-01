@@ -19,14 +19,14 @@ what the repository actually supports today.
 - `crates/plugins/<plugin>` contains individually packaged, statically linked
   Raven plugins. Keep each plugin in its own crate and preserve the
   `raven-plugin-*` package naming convention.
-- `crates/source-alloy` owns Alloy-backed HTTP/WebSocket JSON-RPC
-  ingestion, source-native conversion, retry/reconciliation, and reorg emission.
+- `crates/source-rpc` owns HTTP/WebSocket JSON-RPC ingestion backed by Alloy,
+  source-native conversion, retry/reconciliation, and reorg emission.
 - `crates/cli` owns Clap UX, config resolution, source/runtime
   orchestration, checkpoints, terminal output, logging, and shutdown handling.
 
 Do not move behavior across these boundaries without a clear reason. In
 particular, core types should stay source-independent, while Alloy-specific RPC
-logic should stay in the `raven-source-alloy` package under `crates/source-alloy`.
+logic should stay in the `raven-source-rpc` package under `crates/source-rpc`.
 
 ## Rust Conventions
 
@@ -63,7 +63,8 @@ logic should stay in the `raven-source-alloy` package under `crates/source-alloy
 
 ## CLI And Runtime Behavior
 
-- `raven run` is standalone JSON-RPC ingestion through the Alloy-backed source.
+- `raven run` is standalone JSON-RPC ingestion through the RPC source, which is
+  currently backed by Alloy.
   The URL scheme selects HTTP polling or WebSocket subscription behavior.
 - Block/log retrieval defaults to a validated JSON-RPC batch. Preserve the
   explicit hash-pinned sequential mode for endpoint compatibility and rollback.

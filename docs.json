@@ -44,7 +44,7 @@
         "group": "Guides",
         "pages": [
           "docs/guides/create-a-plugin",
-          "docs/guides/alloy-source"
+          "docs/guides/rpc-source"
         ]
       },
       {

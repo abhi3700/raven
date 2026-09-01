@@ -76,7 +76,7 @@ cargo build --workspace
 cargo test --workspace --all-targets
 ```
 
-### Run with Alloy
+### Run with RPC
 
 Pass an endpoint directly:
 
@@ -247,7 +247,7 @@ raven/
 │   ├── plugins/             # Bundled, statically linked plugin crates
 │   ├── plugin-sdk/          # Plugin contract and context
 │   ├── runtime/             # Registry, lifecycle, and dispatcher
-│   └── source-alloy/        # Alloy-backed HTTP/WebSocket JSON-RPC source
+│   └── source-rpc/          # HTTP/WebSocket JSON-RPC source, backed by Alloy
 ├── docs/                    # Mintlify MDX pages
 ├── docs.json                # Mintlify site configuration
 ├── res/                     # Brand assets

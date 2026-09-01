@@ -5,7 +5,7 @@ use clap::{
 	Args, Parser, Subcommand, ValueEnum,
 	builder::styling::{AnsiColor, Effects, Styles},
 };
-use raven_source_alloy::BlockFetchMode;
+use raven_source_rpc::BlockFetchMode;
 
 const RAVEN_STYLES: Styles = Styles::styled()
 	.header(AnsiColor::BrightBlue.on_default().effects(Effects::BOLD))

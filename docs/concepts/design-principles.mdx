@@ -8,9 +8,9 @@ sits between chain-data adapters and application logic:
 
 ```mermaid
 flowchart LR
-    rpc[EVM JSON-RPC] --> alloy[Alloy-backed RPC adapter]
+    rpc[EVM JSON-RPC] --> rpcSource[RPC source backed by Alloy]
     reth[Embedded Reth ExEx] -. planned .-> event[Normalized ChainEvent]
-    alloy --> event
+    rpcSource --> event
     event --> runtime[Raven Runtime]
     runtime --> dispatcher[Dispatcher]
     dispatcher --> swap[Swap plugin]
@@ -61,7 +61,7 @@ non-chain services such as a database or notification provider.
 
 | Boundary | Rule | Current enforcement |
 | --- | --- | --- |
-| Source | Convert source-native data into `ChainEvent` | Implemented for JSON-RPC by `raven-source-alloy` |
+| Source | Convert source-native data into `ChainEvent` | Implemented for JSON-RPC by `raven-source-rpc` |
 | Core | Prevent invalid normalized values from entering the runtime | Constructors, private fields, and validated deserialization |
 | Runtime | Accept events for exactly one EIP-155 chain ID | Checked before every dispatch |
 | Dispatcher | Attempt non-blocking fan-out to every plugin worker | Independent bounded mailboxes and live outcomes |

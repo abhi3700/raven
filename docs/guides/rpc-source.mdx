@@ -1,17 +1,18 @@
 ---
-title: "RPC ingestion with Alloy"
-description: "How Raven's Alloy-backed RPC adapter combines polling or WebSocket subscriptions with ordered reconciliation."
+title: "RPC source"
+description: "How Raven's RPC source combines HTTP polling or WebSocket subscriptions with ordered reconciliation."
 ---
 
-`AlloySource` is the internal adapter behind `raven run`. It connects to
+`RpcSource` is the adapter behind `raven run`. It connects to
 EVM-compatible HTTP(S) and WS(S) JSON-RPC endpoints, fetches each block and its
 logs in one validated batch by default, converts them into normalized
 `ChainEvent` values, and publishes them through a bounded Tokio channel. The
 original sequential, hash-pinned strategy remains available explicitly.
 
-The CLI does not expose `--source alloy`: Alloy is the implementation of the
-current RPC path, not an operator-selected deployment mode. The endpoint may be
-hosted or self-managed; the URL scheme selects the transport behavior.
+The crate uses Alloy for its provider and native RPC types. The CLI does not
+expose `--source alloy` because the implementation library is not an
+operator-selected deployment mode. The endpoint may be hosted or self-managed;
+the URL scheme selects the transport behavior.
 
 ## Production strategy
 
@@ -153,12 +154,12 @@ HTTP example:
 ```rust
 use std::time::Duration;
 
-use raven_source_alloy::{AlloySource, SourceStart};
+use raven_source_rpc::{RpcSource, SourceStart};
 use tokio::sync::mpsc;
 
 let (sender, mut receiver) = mpsc::channel(256);
 
-let source = AlloySource::new("http://localhost:8545")
+let source = RpcSource::new("http://localhost:8545")
     .with_poll_interval(Duration::from_secs(1))
     .with_start(SourceStart::Block(20_000_000))
     .with_reorg_depth(64);
@@ -177,9 +178,9 @@ WebSocket example:
 ```rust
 use std::time::Duration;
 
-use raven_source_alloy::AlloySource;
+use raven_source_rpc::RpcSource;
 
-let source = AlloySource::new("wss://your-evm-rpc.example")
+let source = RpcSource::new("wss://your-evm-rpc.example")
     .with_reconciliation_interval(Duration::from_secs(30));
 ```
 
@@ -189,9 +190,9 @@ block fetch mode is `BlockFetchMode::Batch`. Select the compatibility path
 explicitly when required:
 
 ```rust
-use raven_source_alloy::{AlloySource, BlockFetchMode};
+use raven_source_rpc::{RpcSource, BlockFetchMode};
 
-let source = AlloySource::new("https://your-evm-rpc.example")
+let source = RpcSource::new("https://your-evm-rpc.example")
     .with_block_fetch_mode(BlockFetchMode::Sequential);
 ```
 
@@ -200,7 +201,7 @@ and an invalid retry policy before processing events.
 
 ## Failure behavior
 
-`AlloySourceError::is_transient` separates retryable transport/state failures
+`RpcSourceError::is_transient` separates retryable transport/state failures
 from terminal contract violations.
 
 Transient failures include connection, block, log, batch, and subscription

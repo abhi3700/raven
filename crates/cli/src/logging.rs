@@ -28,7 +28,7 @@ const HASH_VALUE: &str = "\x1b[95m";
 const ERROR_VALUE: &str = "\x1b[91m";
 
 const PLUGIN_SPAN_NAME: &str = "raven.plugin";
-const DEFAULT_LOG_FILTER: &str = "raven=info,raven_plugin_=info,raven_source_alloy=info";
+const DEFAULT_LOG_FILTER: &str = "raven=info,raven_plugin_=info,raven_source_rpc=info";
 
 /// Terminal color assigned by the CLI when a plugin is registered.
 ///

@@ -38,8 +38,9 @@ overlap when it does not require an undecided contract.
 - [x] Handler-error isolation and per-worker panic quarantine
 - [x] Concurrent plugin startup and graceful parallel drain on shutdown
 - [x] Runtime state and event-chain validation
-- [x] Alloy HTTP(S) JSON-RPC block polling
-- [x] Alloy WS(S) `newHeads` subscription with periodic reconciliation
+- [x] HTTP(S) JSON-RPC block polling through the Alloy-backed RPC source
+- [x] WS(S) `newHeads` subscription with periodic reconciliation through the
+  RPC source
 - [x] Ordered catch-up across blocks missed between polls or notifications
 - [x] Capped retry of transient RPC failures with jitter and telemetry
 - [x] Bounded shallow-reorg detection with revert-before-apply ordering
