@@ -12,6 +12,12 @@ Each plugin keeps its own package manifest, source tree, tests, and dependencies
 future plugins should follow this layout without changing the public package
 naming convention.
 
+Standalone consumer applications live under `crates/projects/<project>` as
+independent repositories rather than workspace members. They consume Raven via
+Git or published package dependencies, so they also prove the public library
+surface without relying on workspace paths. See
+[Use Raven as a Rust library](/docs/guides/use-as-a-library).
+
 See [Contribute to Raven](/docs/development/contributing) for the plugin
 contribution, validation, and pull request workflow.
 
@@ -135,3 +141,11 @@ The binary crate owns:
 
 The CLI is an integration layer. Domain types belong in `raven-core` and runtime
 policy belongs in `raven-runtime`.
+
+## Standalone projects
+
+`crates/projects/raven-redis-stash` composes `raven-source-rpc`,
+`raven-runtime`, `raven-plugin-sdk`, and the reusable ERC-20 transfer detector.
+Its application-defined plugin stores matched data in Redis and treats
+`BlockReverted` as a canonical-state correction. It is intentionally outside
+the seven-crate workspace and has no relative Raven dependencies.

@@ -23,6 +23,10 @@ what the repository actually supports today.
   source-native conversion, retry/reconciliation, and reorg emission.
 - `crates/cli` owns Clap UX, config resolution, source/runtime
   orchestration, checkpoints, terminal output, logging, and shutdown handling.
+- `crates/projects/<project>` contains standalone applications that embed Raven.
+  Keep each project outside the root Cargo workspace, consume Raven through
+  published or Git dependencies instead of relative paths, and add it as a Git
+  submodule when it is maintained as an independent repository.
 
 Do not move behavior across these boundaries without a clear reason. In
 particular, core types should stay source-independent, while Alloy-specific RPC

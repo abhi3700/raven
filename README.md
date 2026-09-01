@@ -198,6 +198,30 @@ Raven-enabled Reth CLI. Operators will run the normal `reth node` flow with
 Raven/plugin configuration, and the node builder will install Raven in-process.
 It will not pretend to attach through a `--source reth` flag.
 
+## Use Raven as a Rust library
+
+Raven's core, plugin SDK, runtime, RPC source, and bundled plugins are library
+crates. An application can compose those crates directly instead of launching
+the `raven` binary or parsing terminal output:
+
+```toml
+[dependencies]
+raven-core = { git = "https://github.com/abhi3700/raven", branch = "feat/phase-1" }
+raven-plugin-sdk = { git = "https://github.com/abhi3700/raven", branch = "feat/phase-1" }
+raven-runtime = { git = "https://github.com/abhi3700/raven", branch = "feat/phase-1" }
+raven-source-rpc = { git = "https://github.com/abhi3700/raven", branch = "feat/phase-1" }
+```
+
+The standalone **Raven Redis Stash** project under
+`crates/projects/raven-redis-stash` demonstrates the complete embedded path. It
+uses Raven crates only through GitHub dependencies, detects large ERC-20
+transfers, awaits each plugin outcome, and stores reorg-aware matched data in
+Redis. Its script uses Redis port `1111` and a Chainlist-listed public Ethereum
+RPC as overridable fallbacks.
+
+See [Use Raven as a Rust library](./docs/guides/use-as-a-library.mdx) for the
+composition model, dependency choices, Redis schema, and reliability boundary.
+
 ## Write a plugin
 
 ```rust
@@ -245,6 +269,7 @@ raven/
 │   ├── cli/                 # CLI and source/runtime orchestration
 │   ├── core/                # Validated normalized chain events
 │   ├── plugins/             # Bundled, statically linked plugin crates
+│   ├── projects/            # Standalone applications that embed Raven
 │   ├── plugin-sdk/          # Plugin contract and context
 │   ├── runtime/             # Registry, lifecycle, and dispatcher
 │   └── source-rpc/          # HTTP/WebSocket JSON-RPC source, backed by Alloy

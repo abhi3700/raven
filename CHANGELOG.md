@@ -26,6 +26,9 @@ on August 25, 2026 (UTC).
   transfer plugin's configuration, matching, reorg, and delivery semantics.
 - Added a concise contribution guide covering Raven fundamentals, plugin
   creation and tests, documentation, validation, pull requests, and review.
+- Added Raven Redis Stash, a standalone Git-sourced Raven consumer that detects
+  large ERC-20 transfers and stores idempotent, reorg-aware records in a local
+  Redis database, plus a guide for embedding Raven as Rust library crates.
 
 ### Changed
 

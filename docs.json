@@ -44,7 +44,8 @@
         "group": "Guides",
         "pages": [
           "docs/guides/create-a-plugin",
-          "docs/guides/rpc-source"
+          "docs/guides/rpc-source",
+          "docs/guides/use-as-a-library"
         ]
       },
       {

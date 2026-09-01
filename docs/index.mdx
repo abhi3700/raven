@@ -14,6 +14,9 @@ delivers those events to reusable plugins.
   <Card title="Build a plugin" icon="plug" href="/docs/guides/create-a-plugin">
     React to normalized chain events with a small Rust trait.
   </Card>
+  <Card title="Embed Raven" icon="library" href="/docs/guides/use-as-a-library">
+    Compose Raven crates inside a standalone Rust application.
+  </Card>
   <Card title="Understand the architecture" icon="blocks" href="/docs/concepts/architecture">
     See how sources, the runtime, dispatcher, and plugins fit together.
   </Card>
@@ -77,6 +80,9 @@ runtime owns lifecycle and dispatch. Plugins own application behavior.
   transition through terminal tracing.
 - Persist an RPC URL and override it through the environment or run command.
 - Register plugins by unique name and run their lifecycle.
+- Embed the core, runtime, RPC source, and plugin crates directly in another
+  Rust application; the Redis Stash sample persists matched transfer data
+  without parsing terminal output.
 - Extend one per-chain runtime with many custom plugins for tracking, automation,
   and notifications without changing Raven internals. Plugins can remain private
   Rust crates or be published for reuse; the host application registers each
