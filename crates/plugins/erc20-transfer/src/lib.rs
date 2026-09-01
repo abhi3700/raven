@@ -201,9 +201,7 @@ impl Erc20TransferOutputFormat {
 	fn is_short(&self) -> bool {
 		self.eq(&Self::Short)
 	}
-}
 
-impl Erc20TransferOutputFormat {
 	const fn as_str(self) -> &'static str {
 		match self {
 			Self::Long => "long",
