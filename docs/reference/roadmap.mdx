@@ -1,57 +1,183 @@
 ---
 title: "Roadmap"
-description: "Implemented capabilities, near-term work, and longer-term direction for Raven."
+description: "A dependency-ordered development plan from Raven's working block pipeline to reliable plugins and additional sources."
 ---
 
-Raven is under active development. This page separates working behavior from
-planned interfaces.
+Raven is under active development. This roadmap distinguishes executable
+behavior from proposals and orders work by the contracts later features depend
+on.
+
+## Development sequence
+
+```mermaid
+flowchart LR
+    baseline[Working block pipeline] --> reliability[1. Reliability contracts]
+    reliability --> eventModel[2. Event model and replay]
+    eventModel --> firstPlugin[3. Large transfer vertical slice]
+    firstPlugin --> pluginPlatform[4. Plugin operations]
+    reliability --> secondSource[5. Reth ExEx integration]
+    eventModel --> secondSource
+    pluginPlatform --> scale[6. Isolation and scale]
+    secondSource --> scale
+```
+
+The numbering expresses dependency order, not calendar commitments. Work can
+overlap when it does not require an undecided contract.
 
 ## Available now
 
 - [x] Validated chain IDs and normalized block events
-- [x] Applied and reverted event variants in the core model
+- [x] Any non-zero EIP-155 chain ID discovered from the configured EVM endpoint
+- [x] Validation-preserving construction and deserialization
+- [x] Applied and reverted variants in the core model
 - [x] Plugin trait and lifecycle context
 - [x] Unique-name plugin registry
-- [x] Sequential, fail-fast event dispatcher
+- [x] One independent Tokio worker and bounded FIFO mailbox per plugin
+- [x] Non-blocking fan-out with per-plugin delivery receipts
+- [x] Live success, error, panic, timeout, and rejection outcomes in completion order
+- [x] Handler-error isolation and per-worker panic quarantine
+- [x] Concurrent plugin startup and graceful parallel drain on shutdown
 - [x] Runtime state and event-chain validation
-- [x] Alloy HTTP JSON-RPC block polling
-- [x] Ordered catch-up across blocks missed between polls
+- [x] HTTP(S) JSON-RPC block polling through the Alloy-backed RPC source
+- [x] WS(S) `newHeads` subscription with periodic reconciliation through the
+  RPC source
+- [x] Ordered catch-up across blocks missed between polls or notifications
+- [x] Capped retry of transient RPC failures with jitter and telemetry
+- [x] Bounded shallow-reorg detection with revert-before-apply ordering
+- [x] Resume, latest, and inclusive explicit-block start positions
+- [x] CLI-owned atomic per-chain checkpoints after all-plugin success
+- [x] Bounded lifecycle hooks, worker health, and aggregate cleanup errors
+- [x] Persistent RPC URL configuration with CLI and environment precedence
+- [x] RPC-focused `raven run` interface without an implementation-specific source flag
 - [x] Working `raven run` orchestration and Ctrl+C shutdown
 - [x] Built-in block logging
+- [x] Hash-pinned normalized EVM logs in block events
+- [x] Opt-in statically linked large ERC-20 transfer monitor
+- [x] `raven doctor` configuration and bounded RPC connectivity checks
 
-## Near term
+## Completed milestone: reliable canonical blocks
 
-- [ ] Reorganization detection and `BlockReverted` emission
-- [ ] Retry and backoff policy for transient RPC failures
-- [ ] Configurable historical starting block
-- [ ] ERC-20 transfer plugin
-- [ ] Richer `raven doctor` diagnostics
-- [ ] Persistent configuration
+This milestone made block delivery and recovery explicit before Raven grows
+the event enum or ships stateful plugins.
 
-## Plugin ecosystem
+1. [x] **Define delivery semantics.** The CLI provides at-least-once delivery,
+   owns the checkpoint, and commits only after every plugin succeeds.
+2. [x] **Finish lifecycle supervision.** Startup, handler, and shutdown hooks
+   are bounded; panic/timeout quarantines rather than restarts a worker; health
+   is inspectable; cleanup reports all lifecycle failures.
+3. [x] **Add source retry policy.** Transient RPC failures use capped
+   exponential backoff with jitter and structured retry telemetry; terminal
+   failures stop explicitly.
+4. [x] **Add start position and checkpoints.** `resume`, `latest`, and an
+   inclusive block height are supported with atomic per-chain persistence.
+5. [x] **Detect shallow reorgs.** A bounded canonical window emits old blocks
+   as `BlockReverted` before replacement `BlockApplied` values.
+6. [x] **Test the contract.** Deterministic fixtures cover ordered catch-up,
+   competing shallow forks, retry timing/classification, checkpoint restart,
+   timeouts, health, and aggregate cleanup failures.
 
-- [ ] Plugin installation and removal
-- [ ] Plugin discovery and registry
-- [ ] Enable and disable controls
-- [ ] Plugin priorities and dependencies
-- [ ] Dynamic loading
-- [ ] Webhook, database, and message-queue sinks
+Exit criteria:
 
-## Event processing
+- [x] A restart resumes from a documented checkpoint without an unexplained gap.
+- [x] A tested shallow fork produces reverted blocks followed by replacement blocks
+  in deterministic order.
+- [x] A timed-out or failing lifecycle hook cannot prevent cleanup of other
+  plugins.
+- [x] `raven doctor` can check configuration and RPC connectivity without starting
+  the event loop.
 
-- [ ] DEX swap decoding
-- [ ] Portfolio tracking
-- [ ] Whale tracking
-- [ ] Telegram alerts
-- [ ] SQLite and PostgreSQL sinks
+## Event model and replay
 
-## Sources and scale
+The initial notes envision blocks, transactions, logs, transfers, swaps, and
+reorganizations. Add them in layers instead of making every source eagerly
+materialize every possible object:
 
-- [ ] Reth ExEx source
-- [ ] WebSocket source configuration
-- [ ] Parallel or isolated plugin dispatch policies
-- [ ] Durable checkpoints
-- [ ] Distributed runtime
+```text
+source-native data
+    └─► canonical chain events
+            └─► decoded protocol or token events
+                    └─► plugin-owned application state and alerts
+```
+
+Planned decisions and work:
+
+- [x] Keep generic EVM logs as block payloads and derive protocol/token meaning
+  in plugins rather than adding one `ChainEvent` variant per ABI event.
+- [x] Protect current durable checkpoint payloads with the checkpoint schema;
+  require future event stores/replay APIs to use their own versioned envelope.
+- [ ] Add fixture builders and round-trip tests for every normalized type.
+- [ ] Keep shutdown and other runtime controls outside `ChainEvent`.
+- [ ] Add replay APIs only after ordering and checkpoint semantics are stable.
+
+## First vertical slice: large ERC-20 transfers
+
+Use the large-transfer monitor from the initial Raven concept as the first
+end-to-end plugin. It exercises logs, configuration, state, and output without
+requiring DEX-specific decoding.
+
+- [x] Normalize or expose the receipt/log data required for ERC-20 `Transfer`.
+- [x] Implement a statically registered transfer plugin with token-address
+  filters and an amount threshold.
+- [x] Prove that the plugin performs no chain polling of its own.
+- [x] Handle reverted blocks so an alert or stored observation can be corrected.
+- [ ] Add one production-shaped sink, such as a webhook; keep Telegram as a
+  follow-up adapter rather than coupling it to detection logic.
+- [x] Provide deterministic unit tests and one opt-in live E2E example.
+
+After that slice is sound, DEX swaps, portfolios, whale activity, databases,
+message queues, and Telegram notifications can reuse the same contracts.
+
+## Plugin operations
+
+Prefer statically linked, configured plugins before dynamic loading:
+
+- [x] Add typed persisted configuration and install/remove controls for bundled plugins.
+- [ ] Add scoped storage, metrics, and cancellation capabilities to
+  `PluginContext` as concrete use cases require them.
+- [ ] Define priorities and dependencies only if real plugins need ordering.
+- [ ] Specify plugin identity, compatibility, trust, and upgrade rules.
+- [ ] Implement discovery, installation, removal, and dynamic loading after the
+  security and ABI boundaries are explicit.
+
+`raven plugins install` and `remove` now manage configuration for plugins
+already bundled with the CLI. Discovery, download, compatibility checks, and
+dynamic loading for separately distributed external plugins remain planned.
+
+## Additional sources and scale
+
+- [ ] Build `raven-source-reth` to translate ExEx commit, revert, and reorg
+  notifications into the same validated event model.
+- [ ] Integrate a version-pinned Raven-enabled Reth CLI so its normal node
+  launch (`reth node`) installs the Raven ExEx and starts configured plugins
+  alongside the node; keep standalone `raven run` for JSON-RPC deployments.
+- [ ] Use `ExExContext` node components and providers for additional state
+  reads instead of opening an active Reth database from a sidecar process.
+- [ ] Map Raven's all-plugin durable success boundary to
+  `ExExEvent::FinishedHeight`; never acknowledge on enqueue because Reth may
+  prune data below the reported height.
+- [ ] Evaluate a versioned remote-ExEx stream only if Raven needs process
+  isolation from Reth; keep it distinct from the standalone RPC path.
+- [ ] Compare Alloy and Reth behavior, then extract a shared source trait if the
+  two implementations demonstrate a useful common interface.
+- [x] Use WebSocket subscriptions with ordered height-gap reconciliation.
+- [x] Define Raven-level terminal reconnect policy and checkpoint-based resume.
+- [x] Add configurable per-plugin timeouts, explicit no-auto-restart policy,
+  health status, and aggregate cleanup errors while preserving FIFO guarantees.
+- [ ] Add dead-letter handling if production plugins demonstrate a concrete
+  recovery workflow that checkpoint replay cannot serve.
+- [ ] Add durable queues or a distributed runtime only after profiling shows a
+  single process is the limiting boundary.
+
+## Architecture decisions
+
+| Decision | Status |
+| --- | --- |
+| At-least-once delivery and checkpoint commit point | Decided: CLI-owned, after every plugin succeeds |
+| Reorg depth and finality policy | Partly decided: configurable bounded window; finality policy remains open |
+| Core versus derived event granularity | Decided for first slice: generic logs are block payloads; ERC-20 transfers are plugin-derived |
+| Reth version support policy | Open; the integrated Reth CLI will be version-pinned |
+| Plugin timeout and restart policy | Decided: bounded hooks, quarantine, no automatic in-process restart |
+| Static versus dynamic plugin packaging | Open; static registration remains the current safe default |
 
 <Note>
 Roadmap items describe direction, not release commitments. Refer to the CLI

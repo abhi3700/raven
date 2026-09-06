@@ -3,24 +3,46 @@ title: "Raven"
 description: "Build event-driven EVM applications with a source-independent runtime and reusable Rust plugins."
 ---
 
-Raven is a programmable event engine for EVM chains. It turns source-specific
-blockchain data into normalized events, then delivers those events to reusable
-plugins.
+Raven is a source-independent event runtime with a plugin system for EVM
+chains. It turns source-specific blockchain data into normalized events, then
+delivers those events to reusable plugins.
 
 <CardGroup cols={2}>
   <Card title="Run Raven" icon="rocket" href="/docs/getting-started/quickstart">
-    Stream blocks from an Ethereum JSON-RPC endpoint with the Alloy source.
+    Stream blocks from any standard EVM JSON-RPC endpoint.
   </Card>
   <Card title="Build a plugin" icon="plug" href="/docs/guides/create-a-plugin">
     React to normalized chain events with a small Rust trait.
   </Card>
+  <Card title="Embed Raven" icon="library" href="/docs/guides/use-as-a-library">
+    Compose Raven crates inside a standalone Rust application.
+  </Card>
   <Card title="Understand the architecture" icon="blocks" href="/docs/concepts/architecture">
     See how sources, the runtime, dispatcher, and plugins fit together.
+  </Card>
+  <Card title="Read the design principles" icon="landmark" href="/docs/concepts/design-principles">
+    Learn which responsibilities belong to sources, the runtime, and plugins.
   </Card>
   <Card title="Explore the crates" icon="package" href="/docs/reference/crates">
     Find the responsibility and stability boundary of every workspace crate.
   </Card>
+  <Card title="ERC-20 transfer plugin" icon="arrow-right-left" href="/docs/plugins/erc20-transfer">
+    Detect configured large token transfers and handle shallow-reorg corrections.
+  </Card>
+  <Card title="Reorg monitor plugin" icon="git-compare-arrows" href="/docs/plugins/reorg-monitor">
+    Observe applied and reverted blocks as canonical-chain transitions.
+  </Card>
+  <Card title="Contribute to Raven" icon="code-2" href="/docs/development/contributing">
+    Learn Raven, build and test a plugin, and submit it for review.
+  </Card>
 </CardGroup>
+
+## Terminology legend
+
+| Term | Meaning in these docs |
+| --- | --- |
+| **Contract** | A software interface, rule, or behavioral guarantee between Raven components, such as the Plugin API or dispatch guarantees. It does not mean an EVM smart contract. |
+| **Smart contract** | An EVM program deployed onchain. References to this meaning always say **smart contract** explicitly. |
 
 ## Why Raven?
 
@@ -28,20 +50,12 @@ Most blockchain applications repeatedly poll RPC endpoints and rebuild the same
 ingestion, normalization, and dispatch logic. Raven extracts that pipeline into
 shared infrastructure:
 
-```text
-EVM chain
-   │
-   ▼
-Event source (Alloy today, Reth ExEx planned)
-   │
-   ▼
-Normalized ChainEvent
-   │
-   ▼
-Raven Runtime
-   │
-   ▼
-Plugins
+```mermaid
+flowchart LR
+    chain[EVM chain] --> source[Event source]
+    source --> event[Normalized ChainEvent]
+    event --> runtime[Raven Runtime]
+    runtime --> plugins[Plugins]
 ```
 
 Source adapters own chain access. The core crate owns normalized types. The
@@ -49,24 +63,43 @@ runtime owns lifecycle and dispatch. Plugins own application behavior.
 
 ## Current capabilities
 
-- Poll any standard Ethereum-compatible HTTP JSON-RPC endpoint with Alloy.
+- Ingest from EVM-compatible HTTP(S) polling or WS(S) subscriptions through the
+  RPC source, currently backed by Alloy.
 - Discover the endpoint's EIP-155 chain ID.
-- Fetch every block observed between polling intervals in ascending order.
-- Normalize blocks into source-independent `ChainEvent` values.
+- Accept any non-zero chain ID without a hard-coded chain allowlist.
+- Reconcile and fetch every observed block height in ascending order.
+- Retry transient RPC failures with bounded exponential backoff and jitter.
+- Resume from an all-plugin-success checkpoint or an explicit block height.
+- Detect bounded shallow forks and emit reverts before replacements.
+- Normalize blocks and their EVM logs into source-independent `ChainEvent` values.
+- Use typed Alloy primitives for block hashes, addresses, log topics, transaction
+  hashes, byte payloads, and ERC-20 amounts.
+- Install the bundled large ERC-20 transfer monitor with persisted raw-unit,
+  token-contract, and output-format settings; reverted blocks emit corrections.
+- Install the bundled reorg monitor to observe every applied and reverted block
+  transition through terminal tracing.
+- Persist an RPC URL and override it through the environment or run command.
 - Register plugins by unique name and run their lifecycle.
+- Embed the core, runtime, RPC source, and plugin crates directly in another
+  Rust application; the Redis Stash sample persists matched transfer data
+  without parsing terminal output.
+- Extend one per-chain runtime with many custom plugins for tracking, automation,
+  and notifications without changing Raven internals. Plugins can remain private
+  Rust crates or be published for reuse; the host application registers each
+  compiled plugin before startup, and each runs on an independent bounded FIFO
+  worker.
 - Reject events whose chain ID does not match the active runtime.
-- Shut down cleanly when the CLI receives Ctrl+C.
+- Bound plugin lifecycle hooks, expose worker health, and shut down cleanly.
 
 <Note>
-Raven is early-stage software. Reth ExEx support, reorg detection, dynamic
-plugin installation, and persistent configuration are planned, not yet
-implemented.
+Raven is early-stage software. The Raven-enabled Reth CLI/ExEx path and loading
+separately distributed external plugins are planned, not yet implemented.
 </Note>
 
 ## Design principle
 
 > Everything is an event.
 
-Blocks, transfers, swaps, liquidations, and contract deployments can all become
-events. Raven keeps transport concerns out of plugins so a plugin can work with
-multiple event sources without changing its business logic.
+Blocks, transfers, swaps, liquidations, and smart-contract deployments can all
+become events. Raven keeps transport concerns out of plugins so a plugin can
+work with multiple event sources without changing its business logic.

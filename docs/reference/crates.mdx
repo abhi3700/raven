@@ -3,15 +3,33 @@ title: "Workspace crates"
 description: "Responsibilities and public interfaces for every crate in the Raven workspace."
 ---
 
-Raven is organized as a Cargo workspace with five crates.
+Raven is organized as a Cargo workspace with seven crates. Directory names are
+short filesystem labels; Cargo package names retain the `raven-*` prefix used by
+`cargo -p`, dependency declarations, and Rust imports.
 
-| Crate | Kind | Responsibility |
-| --- | --- | --- |
-| `raven-core` | Library | Validated, source-independent chain types |
-| `raven-plugin-sdk` | Library | Plugin trait, context, metadata, and errors |
-| `raven-runtime` | Library | Plugin registration, lifecycle, validation, and dispatch |
-| `raven-source-alloy` | Library | HTTP JSON-RPC polling and Alloy-to-Raven conversion |
-| `raven` | Binary | CLI parsing and source/runtime orchestration |
+Reusable statically linked plugin crates live under `crates/plugins/<plugin>/`.
+Each plugin keeps its own package manifest, source tree, tests, and dependencies;
+future plugins should follow this layout without changing the public package
+naming convention.
+
+Standalone consumer applications live under `crates/projects/<project>` as
+independent repositories rather than workspace members. They consume Raven via
+Git or published package dependencies, so they also prove the public library
+surface without relying on workspace paths. See
+[Use Raven as a Rust library](/docs/guides/use-as-a-library).
+
+See [Contribute to Raven](/docs/development/contributing) for the plugin
+contribution, validation, and pull request workflow.
+
+| Cargo package | Directory | Kind | Responsibility |
+| --- | --- | --- | --- |
+| `raven-core` | `crates/core` | Library | Validated, source-independent chain types |
+| `raven-plugin-erc20-transfer` | `crates/plugins/erc20-transfer` | Library | Static large ERC-20 transfer detection plugin |
+| `raven-plugin-reorg-monitor` | `crates/plugins/reorg-monitor` | Library | Static canonical-chain transition monitor |
+| `raven-plugin-sdk` | `crates/plugin-sdk` | Library | Plugin trait, context, metadata, and errors |
+| `raven-runtime` | `crates/runtime` | Library | Plugin registration, lifecycle, validation, and dispatch |
+| `raven-source-rpc` | `crates/source-rpc` | Library | EVM JSON-RPC polling, WS subscriptions, reconciliation, and normalization |
+| `raven` | `crates/cli` | Binary | CLI parsing and source/runtime orchestration |
 
 ## `raven-core`
 
@@ -19,11 +37,38 @@ Public exports:
 
 - `ChainId`
 - `BlockEvent`
+- `EvmLog`
 - `ChainEvent`
 - `CoreError`
 
 Use this crate in source adapters, plugins, serialization boundaries, and tests
 that construct normalized events.
+
+## [`raven-plugin-erc20-transfer`](/docs/plugins/erc20-transfer)
+
+Public exports:
+
+- `Erc20TransferConfig`
+- `Erc20TransferPlugin`
+- `Erc20TransferConfigError`
+- `LargeTransfer`
+
+This plugin decodes `Transfer(address,address,uint256)` from normalized block
+logs. It can filter token contract addresses and uses an inclusive raw-unit
+amount threshold. It intentionally has no RPC dependency. See the
+[ERC-20 transfer plugin guide](/docs/plugins/erc20-transfer) for configuration,
+matching, reorg, and delivery semantics.
+
+## `raven-plugin-reorg-monitor`
+
+Public export:
+
+- `ReorgMonitorPlugin`
+
+This stateless plugin reports normalized `BlockApplied` and `BlockReverted`
+events through tracing. It has no RPC dependency and relies on the source's
+validated reorg ordering. See the [reorg monitor plugin guide](/docs/plugins/reorg-monitor)
+for terminal output and correction semantics.
 
 ## `raven-plugin-sdk`
 
@@ -35,7 +80,7 @@ Public exports:
 - `PluginError`
 - `PluginResult`
 
-Use this crate when implementing an event processor.
+Use this crate when implementing a Raven plugin.
 
 ## `raven-runtime`
 
@@ -44,31 +89,63 @@ Public exports:
 - `Runtime`
 - `RuntimeError`
 - `RuntimeResult`
+- `DispatchId`
+- `DispatchReceipt`
+- `PluginDelivery`
+- `PluginDeliveryStatus`
+- `PluginDeliveryFailure`
+- `PluginOutcome`
+- `PluginOutcomeStatus`
+- `PluginHealth`
+- `PluginHealthStatus`
+- `PluginTimeouts`
+- `DEFAULT_PLUGIN_MAILBOX_CAPACITY`
+- `DEFAULT_OUTCOME_CHANNEL_CAPACITY`
 
 `Dispatcher` and `PluginRegistry` are internal implementation details. Use
 `Runtime::register_plugin` and lifecycle methods instead of depending on them.
+`Runtime::process` returns non-blocking per-plugin delivery information;
+`Runtime::subscribe_outcomes` exposes independently completed handler results.
+See [Runtime reference](/docs/reference/runtime) for a single-page explanation
+of lifecycle, worker topology, receipts, outcomes, health, and failure isolation.
 
-## `raven-source-alloy`
+## `raven-source-rpc`
 
 Public exports:
 
-- `AlloySource`
-- `AlloySourceError`
-- `AlloySourceResult`
+- `RpcSource`
+- `RpcSourceError`
+- `RpcSourceResult`
+- `SourceStart`
+- `RetryPolicy`
+- `RpcTransport`
+- `RpcEndpointInfo`
+- `inspect_rpc_endpoint`
 
-Alloy block conversion remains private so source-native types do not leak into
-the rest of the workspace.
+This crate is the implementation behind the CLI's RPC ingestion; operators do
+not select it with a source flag. Alloy block conversion remains private so
+source-native types do not leak into the rest of the workspace.
 
 ## `raven`
 
 The binary crate owns:
 
 - Command-line parsing.
+- Persistent RPC URL and bundled-plugin configuration.
+- Chain-specific atomic checkpoint persistence and at-least-once success gate.
 - Tracing initialization.
-- Source task creation.
-- Runtime initialization from the first discovered event.
+- RPC source task creation.
+- Endpoint inspection and runtime initialization from the discovered chain ID.
 - Ctrl+C handling and graceful shutdown.
-- The built-in block logger used by `raven run`.
+- The always-active block logger and configured bundled monitors used by `raven run`.
 
 The CLI is an integration layer. Domain types belong in `raven-core` and runtime
 policy belongs in `raven-runtime`.
+
+## Standalone projects
+
+`crates/projects/raven-redis-stash` composes `raven-source-rpc`,
+`raven-runtime`, `raven-plugin-sdk`, and the reusable ERC-20 transfer detector.
+Its application-defined plugin stores matched data in Redis and treats
+`BlockReverted` as a canonical-state correction. It is intentionally outside
+the seven-crate workspace and has no relative Raven dependencies.

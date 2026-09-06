@@ -1,0 +1,46 @@
+//! EVM JSON-RPC source for Raven, backed by Alloy.
+//!
+//! This crate is the boundary between an EVM RPC node and Raven's
+//! source-independent runtime model. Alloy owns the transport client and native
+//! RPC response types; Raven owns canonical ordering, reorg semantics, and the
+//! normalized `ChainEvent` values sent to its runtime.
+//!
+//! ```text
+//! EVM JSON-RPC node
+//!        |
+//!        v
+//! Alloy Provider + RPC types
+//!        |
+//!        v
+//! source.rs
+//!   - select HTTP polling or WebSocket subscriptions
+//!   - fetch each full block and its logs in a validated JSON-RPC batch by default
+//!   - preserve hash-pinned sequential retrieval as an explicit compatibility mode
+//!   - preserve a canonical cursor across reconnects
+//!   - reconcile remembered ancestry with the RPC canonical chain
+//!   - emit applied and reverted blocks in dependency order
+//!        |
+//!        v
+//! converter.rs
+//!   - validate mined log identity and deterministic ordering
+//!   - build Raven's validated BlockEvent/EvmLog/ChainEvent model
+//!        |
+//!        v
+//! Raven runtime and plugins
+//! ```
+//!
+//! The useful mental split is:
+//!
+//! - `source.rs` decides when to connect, which block heights Raven still needs, and whether
+//!   retained blocks must be reverted.
+//! - `converter.rs` decides how an Alloy block becomes Raven's normalized event representation.
+
+mod converter;
+mod error;
+mod source;
+
+pub use error::{RpcSourceError, RpcSourceResult};
+pub use source::{
+	BlockFetchMode, RetryPolicy, RpcEndpointInfo, RpcSource, RpcTransport, SourceStart,
+	inspect_rpc_endpoint,
+};

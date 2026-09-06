@@ -2,7 +2,7 @@
   "$schema": "https://mintlify.com/docs.json",
   "theme": "mint",
   "name": "Raven",
-  "description": "A programmable event engine for EVM chains.",
+  "description": "A programmable blockchain event runtime powered by plugins.",
   "colors": {
     "primary": "#168BFF",
     "light": "#42A5FF",
@@ -35,6 +35,7 @@
         "group": "Core concepts",
         "pages": [
           "docs/concepts/architecture",
+          "docs/concepts/design-principles",
           "docs/concepts/events",
           "docs/concepts/plugin-lifecycle"
         ]
@@ -43,13 +44,28 @@
         "group": "Guides",
         "pages": [
           "docs/guides/create-a-plugin",
-          "docs/guides/alloy-source"
+          "docs/guides/rpc-source",
+          "docs/guides/use-as-a-library"
+        ]
+      },
+      {
+        "group": "Plugins",
+        "pages": [
+          "docs/plugins/erc20-transfer",
+          "docs/plugins/reorg-monitor"
+        ]
+      },
+      {
+        "group": "Contribute",
+        "pages": [
+          "docs/development/contributing"
         ]
       },
       {
         "group": "Reference",
         "pages": [
           "docs/reference/cli",
+          "docs/reference/runtime",
           "docs/reference/crates",
           "docs/reference/roadmap"
         ]

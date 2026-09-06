@@ -1,0 +1,231 @@
+---
+title: "RPC source"
+description: "How Raven's RPC source combines HTTP polling or WebSocket subscriptions with ordered reconciliation."
+---
+
+`RpcSource` is the adapter behind `raven run`. It connects to
+EVM-compatible HTTP(S) and WS(S) JSON-RPC endpoints, fetches each block and its
+logs in one validated batch by default, converts them into normalized
+`ChainEvent` values, and publishes them through a bounded Tokio channel. The
+original sequential, hash-pinned strategy remains available explicitly.
+
+The crate uses Alloy for its provider and native RPC types. The CLI does not
+expose `--source alloy` because the implementation library is not an
+operator-selected deployment mode. The endpoint may be hosted or self-managed;
+the URL scheme selects the transport behavior.
+
+## Production strategy
+
+Raven chooses the ingestion strategy from the URL scheme:
+
+```mermaid
+flowchart LR
+    url[RPC URL] --> scheme{URL scheme}
+    scheme -->|http or https| polling[Poll eth_blockNumber every 4s]
+    scheme -->|ws or wss| heads[Subscribe to newHeads]
+    heads --> immediate[Immediate target height]
+    scheme -->|ws or wss| safety[Reconcile eth_blockNumber every 30s]
+    polling --> catchup[Ordered catch-up]
+    immediate --> catchup
+    safety --> catchup
+    catchup --> mode{Block fetch mode}
+    mode -->|batch, default| batch[One packet: block by number + logs by number]
+    mode -->|sequential| block[Fetch block by number]
+    block --> logs[Fetch logs by block hash]
+    batch --> validate[Validate block and logs together]
+    logs --> validate
+    validate --> events[Normalized ChainEvent values]
+```
+
+HTTP is request/response transport, so periodic polling is the portable
+choice. A WebSocket is persistent and supports `eth_subscribe`, so Raven uses
+`newHeads` for low-latency signals rather than polling every few seconds as its
+primary mechanism.
+
+Raven deliberately does not use a subscription alone. JSON-RPC subscriptions
+deliver current events rather than history, are tied to a live connection, and
+may omit intermediate notifications when several blocks arrive close together.
+A slower `eth_blockNumber` reconciliation therefore provides a correctness
+safety net without turning WebSocket operation back into aggressive polling.
+
+See Alloy's
+[block subscription example](https://alloy.rs/examples/subscriptions/subscribe_blocks/)
+and Geth's
+[subscription considerations](https://geth.ethereum.org/docs/interacting-with-geth/rpc/pubsub)
+for the underlying transport behavior.
+
+## Chain discovery
+
+The endpoint, not a compile-time constant, selects the chain:
+
+```mermaid
+flowchart LR
+    rpc[EVM RPC endpoint] --> chainId[eth_chainId]
+    chainId --> validate[Validate non-zero EIP-155 ID]
+    validate --> event[Tag every ChainEvent]
+    event --> inspect[CLI selects per-chain checkpoint]
+    inspect --> context[Runtime and PluginContext use detected ID]
+```
+
+`ChainId` accepts every non-zero `u64`; Raven does not compare the discovered
+value against a supported-chain list. Alloy's default Ethereum network type is
+the baseline RPC block schema used by EVM chains—it does not force chain ID 1.
+An endpoint must provide the standard `eth_chainId`, `eth_blockNumber`,
+`eth_getBlockByNumber`, and `eth_getLogs` methods, plus `eth_subscribe` when
+using WS(S). Batch mode additionally requires JSON-RPC batch-packet support;
+select sequential mode for an endpoint that rejects batches.
+
+## One canonical catch-up path
+
+Both triggers feed the same cursor-based algorithm:
+
+```text
+observed target height N
+        │
+        ▼
+compare bounded retained ancestry with canonical RPC blocks
+        │
+        ├─ fork ─► revert old tip down to common ancestor
+        │
+        ▼
+fetch every replacement/missing height through N
+        │
+        ▼
+verify parent links, emit Applied, retain bounded ancestry
+```
+
+A WebSocket header is only a signal that a height is available. Raven does not
+publish the partial header as its block event. It requests every full block
+from the cursor through the signalled height using `eth_getBlockByNumber`.
+
+In the default `batch` mode, Raven places that request and an `eth_getLogs`
+request whose `fromBlock` and `toBlock` are the same height into one JSON-RPC
+packet. A batch is not an atomic node snapshot, so Raven verifies the returned
+block number, every log's block number and hash, and the aggregate logs bloom.
+A mismatch means the canonical chain changed while the packet was handled;
+Raven retries reconciliation instead of emitting a mixed event.
+
+In `sequential` mode, Raven first receives the block and then requests logs
+pinned to its hash. This preserves the original two-round-trip behavior as an
+endpoint-compatibility and rollback option. Both modes use the same conversion,
+ordering, reorg, and checkpoint logic after retrieval.
+
+RPC logs must report the expected block number and hash, transaction hash,
+transaction index, and log index. Raven rejects removed, mismatched, incomplete,
+duplicate, or out-of-range logs before the event reaches the runtime. Valid logs
+are sorted by transaction index and log index.
+
+For example, if Raven's next height is 100 and it observes head 103, it emits
+100, 101, 102, and 103 in ascending order. A duplicate or stale notification
+below the cursor causes an ancestry check. The same behavior applies when the
+periodic reconciliation discovers a gap.
+
+At startup Raven subscribes before reading the current height, preventing a
+block mined during initialization from falling between those operations. It
+then emits the configured start position through the current head. Raven owns
+reconnection so the same in-memory cursor/window survives a new provider and
+subscription; reconciliation then closes the gap.
+
+<Note>
+    A shallow fork emits old blocks in descending `BlockReverted` order, then
+    replacement blocks in ascending `BlockApplied` order. A fork with no common
+    ancestor in the retained window is terminal rather than silently skipping
+    a correction. The default window is 64 blocks.
+</Note>
+
+## Start positions and durable resume
+
+`SourceStart` supports:
+
+- `Latest`: emit the current head and follow it.
+- `Block(N)`: emit block `N` inclusively and catch up.
+- `Resume(blocks)`: verify a contiguous, parent-linked durable ancestry window
+  and continue after its tip.
+
+The source's cursor is optimistic in-memory state. The `raven` CLI owns the
+durable checkpoint and advances it only after all plugins succeed. This split
+means a crash can replay an event but cannot silently acknowledge one that a
+plugin did not finish.
+
+## Configure the source in Rust
+
+HTTP example:
+
+```rust
+use std::time::Duration;
+
+use raven_source_rpc::{RpcSource, SourceStart};
+use tokio::sync::mpsc;
+
+let (sender, mut receiver) = mpsc::channel(256);
+
+let source = RpcSource::new("http://localhost:8545")
+    .with_poll_interval(Duration::from_secs(1))
+    .with_start(SourceStart::Block(20_000_000))
+    .with_reorg_depth(64);
+
+tokio::spawn(async move {
+    source.run(sender).await
+});
+
+while let Some(event) = receiver.recv().await {
+    println!("received block {}", event.block_number());
+}
+```
+
+WebSocket example:
+
+```rust
+use std::time::Duration;
+
+use raven_source_rpc::RpcSource;
+
+let source = RpcSource::new("wss://your-evm-rpc.example")
+    .with_reconciliation_interval(Duration::from_secs(30));
+```
+
+The default HTTP poll interval is 4 seconds. The default WS reconciliation
+interval is 30 seconds. The default reorg window is 64 blocks, and the default
+block fetch mode is `BlockFetchMode::Batch`. Select the compatibility path
+explicitly when required:
+
+```rust
+use raven_source_rpc::{RpcSource, BlockFetchMode};
+
+let source = RpcSource::new("https://your-evm-rpc.example")
+    .with_block_fetch_mode(BlockFetchMode::Sequential);
+```
+
+Source configuration rejects zero intervals/depth, malformed resume windows,
+and an invalid retry policy before processing events.
+
+## Failure behavior
+
+`RpcSourceError::is_transient` separates retryable transport/state failures
+from terminal contract violations.
+
+Transient failures include connection, block, log, batch, and subscription
+request errors, a closed subscription, a temporarily omitted block, and the
+chain changing during a multi-block reconciliation. Raven reconnects with
+exponential backoff starting at 500 ms, capped at 30 seconds, with 20% jitter.
+Every retry logs its attempt, delay, and cause.
+
+Terminal failures include an invalid URL/configuration, invalid chain ID,
+resume checkpoint mismatch, block conversion failure, receiver loss, and a
+reorg deeper than retained ancestry. Terminal failures stop the source rather
+than retrying a condition that cannot be repaired by reconnecting.
+
+## Current limitations
+
+- Reorg recovery is intentionally bounded; deep forks require operator action
+  and a deliberate new start position.
+- The source does not persist state by itself. Embedders other than the Raven
+  CLI must own their acknowledgement/checkpoint contract.
+- Batch mode still executes two JSON-RPC methods per block, but carries them in
+  one transport packet. Sequential mode uses two dependent transport requests.
+- Fetching all logs makes checkpoint size proportional to the retained log
+  payload.
+- Some endpoints disable JSON-RPC batch packets; use
+  `--block-fetch-mode sequential` with those providers.
+- JSON-RPC providers may differ in retention and EVM compatibility, so explicit
+  historical starts can fail when the endpoint has pruned the requested data.

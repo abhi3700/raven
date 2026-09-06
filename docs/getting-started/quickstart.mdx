@@ -5,13 +5,28 @@ description: "Connect Raven to an EVM JSON-RPC endpoint and process live block e
 
 ## 1. Choose an RPC endpoint
 
-Raven currently supports Ethereum-compatible HTTP JSON-RPC endpoints through
-Alloy. You may use a local node or a hosted provider.
+Raven supports EVM-compatible HTTP(S) and WebSocket (WS/WSS) JSON-RPC
+endpoints through the RPC source, currently backed by Alloy. You may use a local
+node or a hosted provider; both use the same RPC ingestion path.
 
-Set the endpoint once for the current shell:
+Persist the endpoint once:
 
 ```bash
-export RAVEN_RPC_URL="http://localhost:8545"
+raven config set --rpc-url http://localhost:8545
+raven config get
+```
+
+Or set it only for the current shell:
+
+```bash
+export NODE_RPC_URL="http://localhost:8545"
+```
+
+RPC URL resolution follows this precedence:
+
+```text
+--rpc-url  ─►  NODE_RPC_URL  ─►  persisted config  ─►  actionable error
+ highest                                                   lowest
 ```
 
 ## 2. Start Raven
@@ -19,32 +34,120 @@ export RAVEN_RPC_URL="http://localhost:8545"
 From the workspace root:
 
 ```bash
-cargo run -p raven -- run --source alloy
+cargo run -p raven -- run
 ```
 
 You can pass the endpoint directly instead:
 
 ```bash
-cargo run -p raven -- run \
-  --source alloy \
-  --rpc-url https://ethereum-rpc.publicnode.com
+raven run \
+  --rpc-url https://your-evm-rpc.example
 ```
 
-Raven discovers the remote chain ID, polls the current block number, fetches
-full blocks, and passes normalized events through the runtime. The CLI's built-in
-`block-logger` plugin logs each processed block.
+For a WebSocket endpoint:
+
+```bash
+raven run --rpc-url wss://your-evm-rpc.example
+```
+
+Remove the persisted value when it is no longer needed:
+
+```bash
+raven config clear
+```
+
+Raven calls `eth_chainId` and accepts any non-zero EIP-155 chain ID. It uses the
+detected chain ID to load a per-chain checkpoint and initialize the runtime;
+every plugin receives that ID through `PluginContext`. Raven then fetches each
+block and its logs in one validated JSON-RPC batch by default before passing
+normalized events through the runtime. Set `--block-fetch-mode sequential` to
+use the original hash-pinned two-request strategy. HTTP(S)
+endpoints use block-number polling. WS(S) endpoints use `newHeads`
+subscriptions for immediate notification plus a slower safety reconciliation.
+The CLI's built-in `block-logger` plugin logs each processed block.
+
+## Monitor large ERC-20 transfers
+
+Install the bundled plugin with an inclusive amount threshold in the token's
+raw smallest unit:
+
+```bash
+raven plugins install erc20-transfer \
+  --min-amount 1000000000000000000000 \
+  --token 0x1111111111111111111111111111111111111111 0x2222222222222222222222222222222222222222
+raven run
+```
+
+List several contracts after one `--token` flag, or omit it to inspect valid
+ERC-20 `Transfer` logs from all contracts. One amount applies to every listed
+token; multiple amounts pair positionally with the same number of addresses.
+Amounts are not decimal-adjusted because decimals belong to each token
+contract. Full hashes and addresses are printed by default; add `--short` to
+the install command to save abbreviated terminal output.
+
+The plugin reads only `BlockEvent.logs()` and never polls the chain. It reports
+matching applied transfers through tracing. If a retained block is removed by a
+shallow reorg, Raven sends the same log payload as `BlockReverted` and the plugin
+reports those matches with `action=reverted`.
+
+## Monitor shallow reorgs
+
+Install the bundled reorg monitor to make each normalized chain transition
+visible in terminal tracing:
+
+```bash
+raven plugins install reorg-monitor
+raven run
+```
+
+Applied blocks are reported at `INFO`. When the source removes a retained block
+after a shallow fork, the monitor reports the corresponding `BlockReverted` at
+`WARN`, before logging the replacement `BlockApplied` blocks. It consumes the
+same normalized events as every other plugin and makes no RPC calls. See the
+[reorg monitor plugin](/docs/plugins/reorg-monitor) for the exact sequence.
+
+There is no `--source alloy` option. Alloy is the current Rust implementation
+of RPC ingestion, not a deployment choice. Raven infers HTTP polling versus
+WebSocket subscriptions from the endpoint scheme.
+
+<Note>
+    Chain agnostic means one Raven process can bind to any EVM chain. A running
+    `Runtime` intentionally accepts one chain ID only, preventing events and
+    mutable plugin state from different chains from being mixed. Run one Raven
+    process per endpoint when monitoring multiple chains.
+</Note>
 
 ## 3. Stop cleanly
 
 Press Ctrl+C. Raven stops the source task and calls `shutdown()` on each started
 plugin before exiting.
 
-## Tune polling
+## Choose a start position
 
-The default polling interval is 4,000 milliseconds:
+The default resumes after the last block that every plugin completed:
 
 ```bash
-cargo run -p raven -- run \
+raven run --start resume
+```
+
+With no checkpoint, `resume` starts at the current head. To intentionally
+ignore saved progress, use `--start latest`. To backfill from an inclusive
+height, pass the number:
+
+```bash
+raven run --start 20_000_000
+```
+
+Raven retains 64 acknowledged blocks by default for shallow-reorg detection.
+Set `--reorg-depth <BLOCKS>` to change that bound. Reverted blocks are delivered
+from tip toward the common ancestor before replacements are applied.
+
+## Tune ingestion intervals
+
+The default HTTP polling interval is 4,000 milliseconds:
+
+```bash
+raven run \
   --rpc-url http://localhost:8545 \
   --poll-interval-ms 1000
 ```
@@ -52,19 +155,38 @@ cargo run -p raven -- run \
 The interval must be at least one millisecond. A shorter interval detects new
 blocks sooner but makes more `eth_blockNumber` requests.
 
-<Warning>
-The Alloy source currently starts from the latest block observed at startup and
-does not backfill older history. It also emits applied blocks only; reorg
-detection is planned.
-</Warning>
+WebSocket endpoints do not poll every four seconds. They subscribe to new heads
+and reconcile the latest height every 30,000 milliseconds by default:
+
+```bash
+raven run \
+  --rpc-url wss://your-evm-rpc.example \
+  --reconciliation-interval-ms 60000
+```
+
+Reconciliation recovers height gaps after a missed notification or reconnect.
+A longer interval reduces safety requests but increases the worst-case time to
+discover such a gap. Both interval values must be greater than zero.
+
+Before debugging the event loop, check config and connectivity with
+`raven doctor`. It reports the transport, chain ID, current head, and latency
+without starting plugins.
 
 ## Next steps
 
 <CardGroup cols={2}>
-  <Card title="Create a plugin" icon="plug" href="/docs/guides/create-a-plugin">
-    Add application-specific event handling.
-  </Card>
-  <Card title="Alloy source behavior" icon="radio" href="/docs/guides/alloy-source">
-    Learn the polling and delivery guarantees.
-  </Card>
+    <Card
+        title="Create a plugin"
+        icon="plug"
+        href="/docs/guides/create-a-plugin"
+    >
+        Add application-specific event handling.
+    </Card>
+    <Card
+        title="RPC ingestion behavior"
+        icon="radio"
+        href="/docs/guides/rpc-source"
+    >
+        Learn the subscription, polling, and catch-up guarantees.
+    </Card>
 </CardGroup>

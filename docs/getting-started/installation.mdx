@@ -10,7 +10,7 @@ You need:
 - Git
 - Rust 1.91 or newer
 - Cargo
-- An Ethereum-compatible HTTP JSON-RPC endpoint
+- An EVM-compatible HTTP(S) or WS(S) JSON-RPC endpoint
 
 The repository pins its Rust toolchain in `rust-toolchain.toml`. Rustup selects
 that toolchain automatically when you enter the project directory.
@@ -51,7 +51,7 @@ The release binary is written to `target/release/raven`.
 Install the current checkout into Cargo's binary directory:
 
 ```bash
-cargo install --path crates/raven-cli
+cargo install --path crates/cli
 ```
 
 Then verify it:
